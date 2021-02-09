@@ -5,4 +5,4 @@ edition = "2021"
 
 [dependencies]
 inkwell = { git = "https://github.com/TheDan64/inkwell.git", features = ["llvm16-0"] }
-semantic-analyzer = { git = "https://github.com/mrLSD/semantic-analyzer-rs.git", branch = "feat/register-number"}
+semantic-analyzer = { git = "https://github.com/mrLSD/semantic-analyzer-rs.git", branch = "feat/func-params"}

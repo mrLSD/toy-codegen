@@ -169,7 +169,7 @@ checksum = "c08c74e62047bb2de4ff487b251e4a92e24f48745648451635cec7d591162d9f"
 [[package]]
 name = "semantic-analyzer"
 version = "0.3.0"
-source = "git+https://github.com/mrLSD/semantic-analyzer-rs.git?branch=feat/register-number#17345b2649f9bc931c89298c820f9ad43fde7977"
+source = "git+https://github.com/mrLSD/semantic-analyzer-rs.git?branch=feat/func-params#0b1d43c782058d376eef9210f9176675f0d739b5"
 dependencies = [
  "nom_locate",
 ]
