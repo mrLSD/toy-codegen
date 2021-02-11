@@ -4,15 +4,15 @@ use inkwell::module::Module;
 use inkwell::types::{
     BasicMetadataTypeEnum, BasicTypeEnum, FloatType, FunctionType, IntType, StringRadix,
 };
-use inkwell::values::PointerValue;
 use inkwell::values::{ArrayValue, FloatValue, FunctionValue, IntValue};
+use inkwell::values::{BasicValueEnum, PointerValue};
 use semantic_analyzer::types::block_state::BlockState;
 use semantic_analyzer::types::expression::{
     ExpressionOperations, ExpressionResult, ExpressionResultValue,
 };
 use semantic_analyzer::types::semantic::SemanticStackContext;
 use semantic_analyzer::types::types::{PrimitiveTypes, Type};
-use semantic_analyzer::types::{FunctionParameter, FunctionStatement, PrimitiveValue, Value};
+use semantic_analyzer::types::{FunctionStatement, PrimitiveValue, Value};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -126,13 +126,14 @@ impl<'ctx> FuncCodegen<'ctx> {
         T: From<IntType<'ctx>> + From<FloatType<'ctx>>,
     {
         match ty {
-            PrimitiveTypes::I8 => self.context.i8_type().into(),
-            PrimitiveTypes::I16 => self.context.i16_type().into(),
-            PrimitiveTypes::I32 => self.context.i32_type().into(),
-            PrimitiveTypes::I64 => self.context.i64_type().into(),
+            PrimitiveTypes::I8 | PrimitiveTypes::U8 => self.context.i8_type().into(),
+            PrimitiveTypes::I16 | PrimitiveTypes::U16 => self.context.i16_type().into(),
+            PrimitiveTypes::I32 | PrimitiveTypes::U32 => self.context.i32_type().into(),
+            PrimitiveTypes::I64 | PrimitiveTypes::U64 => self.context.i64_type().into(),
             PrimitiveTypes::F32 => self.context.f32_type().into(),
             PrimitiveTypes::F64 => self.context.f64_type().into(),
-            _ => panic!("wrong primitive type"),
+            PrimitiveTypes::Bool => self.context.bool_type().into(),
+            _ => panic!("wrong primitive type {ty:?}"),
         }
     }
 
@@ -173,7 +174,7 @@ impl<'ctx> FuncCodegen<'ctx> {
         }
     }
 
-    fn fn_init_params(&self, _builder: &Builder<'ctx>, fn_decl: &FunctionStatement) {
+    fn _fn_init_params(&self, _builder: &Builder<'ctx>, fn_decl: &FunctionStatement) {
         let func_val = self.get_func();
         for (i, _arg) in func_val.get_param_iter().enumerate() {
             let param_name = fn_decl.parameters[i].to_string();
@@ -312,7 +313,7 @@ impl<'ctx> FuncCodegen<'ctx> {
                 {
                     ConstValue::Float(builder.build_float_add(*lhs, *rhs, "tmp_add").unwrap())
                 } else {
-                    panic!("unsupported type for operation ");
+                    panic!("unsupported type for operation");
                 }
             }
             ExpressionOperations::Minus => {
@@ -384,7 +385,7 @@ impl<'ctx> FuncCodegen<'ctx> {
                 let ty_val: BasicMetadataTypeEnum = self.convert_meta_primitive_type(ty);
                 self.create_entry_block_alloca(ty_val, &name)
             }
-            _ => panic!("wrong param type"),
+            _ => panic!("wrong param type {:?}", let_decl.inner_type),
         };
         // Set position for next instr
         let entry = self.get_func().get_first_basic_block().unwrap();
@@ -448,7 +449,38 @@ impl<'ctx> FuncCodegen<'ctx> {
         self.entities.insert(register_number.to_string(), res);
     }
 
-    fn func_arg(&self, _builder: &Builder<'ctx>, _value: &Value, _func_arg: &FunctionParameter) {}
+    fn func_arg(
+        &mut self,
+        builder: &Builder<'ctx>,
+        func_val: &FunctionValue<'ctx>,
+        value: &Value,
+        fn_decl: &FunctionStatement,
+    ) {
+        let value_name = value.inner_name.to_string();
+        let alloca = match &value.inner_type {
+            Type::Primitive(ty) => {
+                let ty_val: BasicMetadataTypeEnum = self.convert_meta_primitive_type(ty);
+                self.create_entry_block_alloca(ty_val, &value_name)
+            }
+            _ => panic!("wrong param type {:?}", value.inner_type),
+        };
+        // Set position for next instr
+        let entry = func_val.get_first_basic_block().unwrap();
+        builder.position_at_end(entry);
+
+        let mut value_arg: Option<BasicValueEnum> = None;
+        for (i, arg) in func_val.get_param_iter().enumerate() {
+            if value_name == fn_decl.parameters[i].to_string() {
+                value_arg = Some(arg);
+            }
+        }
+        builder
+            .build_store(alloca, value_arg.expect("expected value"))
+            .unwrap();
+        // Store to entities
+        self.entities
+            .insert(value_name, ConstValue::Pointer(alloca));
+    }
 
     pub fn func_body(
         &mut self,
@@ -459,7 +491,7 @@ impl<'ctx> FuncCodegen<'ctx> {
         let func_val = self.get_func();
         let entry = self.context.append_basic_block(func_val, "entry");
         builder.position_at_end(entry);
-        self.fn_init_params(builder, fn_decl);
+        //self.fn_init_params(builder, fn_decl);
         builder.position_at_end(entry);
 
         let ctxs = func_body.borrow().get_context().get();
@@ -493,8 +525,8 @@ impl<'ctx> FuncCodegen<'ctx> {
                     expression,
                     register_number,
                 } => self.expr_value(builder, expression, *register_number),
-                SemanticStackContext::FunctionArg { value, func_arg } => {
-                    self.func_arg(builder, value, func_arg)
+                SemanticStackContext::FunctionArg { value, .. } => {
+                    self.func_arg(builder, &func_val, value, fn_decl)
                 }
                 _ => println!("-> {ctx:?}"),
             }
