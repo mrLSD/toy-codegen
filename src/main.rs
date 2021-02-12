@@ -1,3 +1,5 @@
+#![allow(clippy::module_name_repetitions)]
+
 use crate::func::FuncCodegen;
 use inkwell::context::Context;
 use inkwell::module::Module;
@@ -5,68 +7,11 @@ use inkwell::targets::{
     CodeModel, FileType, InitializationConfig, RelocMode, Target, TargetMachine,
 };
 use inkwell::OptimizationLevel;
-use semantic_analyzer::ast;
 use semantic_analyzer::semantic::State;
 use semantic_analyzer::types::semantic::SemanticStackContext;
 
+mod ast;
 mod func;
-
-fn semantic_stack() -> State {
-    let content: ast::Main = vec![ast::MainStatement::Function(ast::FunctionStatement {
-        name: ast::FunctionName::new(ast::Ident::new("fn1")),
-        result_type: ast::Type::Primitive(ast::PrimitiveTypes::I8),
-        parameters: vec![ast::FunctionParameter {
-            name: ast::ParameterName::new(ast::Ident::new("x")),
-            parameter_type: ast::Type::Primitive(ast::PrimitiveTypes::I8),
-        }],
-        body: vec![
-            ast::BodyStatement::LetBinding(ast::LetBinding {
-                name: ast::ValueName::new(ast::Ident::new("y")),
-                mutable: true,
-                value_type: Some(ast::Type::Primitive(ast::PrimitiveTypes::I8)),
-                value: Box::new(ast::Expression {
-                    expression_value: ast::ExpressionValue::PrimitiveValue(
-                        ast::PrimitiveValue::I8(12),
-                    ),
-                    operation: Some((
-                        ast::ExpressionOperations::Plus,
-                        Box::new(ast::Expression {
-                            expression_value: ast::ExpressionValue::PrimitiveValue(
-                                ast::PrimitiveValue::I8(1),
-                            ),
-                            operation: None,
-                        }),
-                    )),
-                }),
-            }),
-            ast::BodyStatement::Binding(ast::Binding {
-                name: ast::ValueName::new(ast::Ident::new("y")),
-                value: Box::new(ast::Expression {
-                    expression_value: ast::ExpressionValue::ValueName(ast::ValueName::new(
-                        ast::Ident::new("y"),
-                    )),
-                    operation: Some((
-                        ast::ExpressionOperations::Minus,
-                        Box::new(ast::Expression {
-                            expression_value: ast::ExpressionValue::PrimitiveValue(
-                                ast::PrimitiveValue::I8(20),
-                            ),
-                            operation: None,
-                        }),
-                    )),
-                }),
-            }),
-            ast::BodyStatement::Return(ast::Expression {
-                expression_value: ast::ExpressionValue::PrimitiveValue(ast::PrimitiveValue::I8(10)),
-                operation: None,
-            }),
-        ],
-    })];
-    let mut state = State::new();
-    state.run(&content);
-    assert!(state.errors.is_empty());
-    state
-}
 
 /// Apply module ot initialized Target Machine
 fn apply_target_to_module(target_machine: &TargetMachine, module: &Module) {
@@ -108,7 +53,7 @@ fn compiler(semantic_state: &State) {
         SemanticStackContext::FunctionDeclaration { fn_decl } => {
             let mut fnv = FuncCodegen::new(&context);
             fnv.fn_declaration(&module, fn_decl);
-            fnv.func_body(&builder, ctx, fn_decl);
+            fnv.func_body(&builder, &ctx, fn_decl);
         }
         _ => panic!("wrong global_context instruction"),
     }
@@ -122,7 +67,8 @@ fn compiler(semantic_state: &State) {
         .unwrap();
 }
 
-fn main() {
-    let semantic_state = semantic_stack();
+fn main() -> anyhow::Result<()> {
+    let semantic_state = ast::semantic_stack();
     compiler(&semantic_state);
+    Ok(())
 }

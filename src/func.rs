@@ -83,7 +83,7 @@ impl<'ctx> FuncCodegen<'ctx> {
                     | PrimitiveTypes::Bool
                     | PrimitiveTypes::Char => arg.into_int_value().set_name(&param_name),
                     PrimitiveTypes::F32 | PrimitiveTypes::F64 => {
-                        arg.into_float_value().set_name(&param_name)
+                        arg.into_float_value().set_name(&param_name);
                     }
                     PrimitiveTypes::String => arg.into_struct_value().set_name(&param_name),
                     PrimitiveTypes::Ptr => arg.into_pointer_value().set_name(&param_name),
@@ -146,10 +146,10 @@ impl<'ctx> FuncCodegen<'ctx> {
         let builder = self.context.create_builder();
         let entry = func_val.get_first_basic_block().unwrap();
 
-        match entry.get_first_instruction() {
-            Some(first_instr) => builder.position_before(&first_instr),
-            None => builder.position_at_end(entry),
-        }
+        entry.get_first_instruction().map_or_else(
+            || builder.position_at_end(entry),
+            |first_instr| builder.position_before(&first_instr),
+        );
 
         if alloc_ty.is_int_type() {
             builder
@@ -188,8 +188,8 @@ impl<'ctx> FuncCodegen<'ctx> {
         }
     }
 
-    fn expr_primitive_value(&self, pval: &PrimitiveValue) -> ConstValue<'ctx> {
-        match pval {
+    fn expr_primitive_value(&self, primitive_val: &PrimitiveValue) -> ConstValue<'ctx> {
+        match primitive_val {
             PrimitiveValue::I8(val) => ConstValue::Int(
                 self.context
                     .i8_type()
@@ -363,10 +363,12 @@ impl<'ctx> FuncCodegen<'ctx> {
     fn expression_function_return(&self, builder: &Builder<'ctx>, expr_result: &ExpressionResult) {
         let ret = self.expr_value_operation(expr_result);
         match ret {
-            ConstValue::Int(v) => builder.build_return(Some(&v)).expect("return val"),
+            ConstValue::Int(v) | ConstValue::Bool(v) | ConstValue::Char(v) => {
+                builder.build_return(Some(&v)).expect("return val")
+            }
+
             ConstValue::Float(v) => builder.build_return(Some(&v)).expect("return val"),
-            ConstValue::Bool(v) => builder.build_return(Some(&v)).expect("return val"),
-            ConstValue::Char(v) => builder.build_return(Some(&v)).expect("return val"),
+
             ConstValue::String(v) => builder.build_return(Some(&v)).expect("return val"),
             ConstValue::Pointer(p) => builder.build_return(Some(&p)).expect("return val"),
             ConstValue::None => builder.build_return(None).expect("return val"),
@@ -392,10 +394,10 @@ impl<'ctx> FuncCodegen<'ctx> {
         builder.position_at_end(entry);
         let res_val = self.expr_value_operation(expr_result);
         match res_val {
-            ConstValue::Int(val) => builder.build_store(alloca, val).unwrap(),
+            ConstValue::Int(val) | ConstValue::Bool(val) | ConstValue::Char(val) => {
+                builder.build_store(alloca, val).unwrap()
+            }
             ConstValue::Float(val) => builder.build_store(alloca, val).unwrap(),
-            ConstValue::Bool(val) => builder.build_store(alloca, val).unwrap(),
-            ConstValue::Char(val) => builder.build_store(alloca, val).unwrap(),
             ConstValue::String(val) => builder.build_store(alloca, val).unwrap(),
             ConstValue::Pointer(val) => builder.build_store(alloca, val).unwrap(),
             // For None just store ZERO
@@ -407,7 +409,13 @@ impl<'ctx> FuncCodegen<'ctx> {
         self.entities.insert(name, ConstValue::Pointer(alloca));
     }
 
-    fn binding(&self, _builder: &Builder<'ctx>, _val: &Value, _expr_result: &ExpressionResult) {
+    #[allow(clippy::unused_self)]
+    const fn binding(
+        &self,
+        _builder: &Builder<'ctx>,
+        _val: &Value,
+        _expr_result: &ExpressionResult,
+    ) {
         //STORE
     }
 
@@ -415,9 +423,7 @@ impl<'ctx> FuncCodegen<'ctx> {
         let name = expression.inner_name.to_string();
         // Get from entities
         let entity = self.entities.get(&name).unwrap();
-        let pval = if let ConstValue::Pointer(pval) = entity {
-            pval
-        } else {
+        let ConstValue::Pointer(pval) = entity else {
             panic!("value not pointer")
         };
         let ty: BasicTypeEnum = match &expression.inner_type {
@@ -452,7 +458,7 @@ impl<'ctx> FuncCodegen<'ctx> {
     fn func_arg(
         &mut self,
         builder: &Builder<'ctx>,
-        func_val: &FunctionValue<'ctx>,
+        func_val: FunctionValue<'ctx>,
         value: &Value,
         fn_decl: &FunctionStatement,
     ) {
@@ -485,7 +491,7 @@ impl<'ctx> FuncCodegen<'ctx> {
     pub fn func_body(
         &mut self,
         builder: &Builder<'ctx>,
-        func_body: Rc<RefCell<BlockState>>,
+        func_body: &Rc<RefCell<BlockState>>,
         fn_decl: &FunctionStatement,
     ) {
         let func_val = self.get_func();
@@ -516,17 +522,17 @@ impl<'ctx> FuncCodegen<'ctx> {
                     expr_result,
                 } => self.let_binding(builder, let_decl, expr_result),
                 SemanticStackContext::Binding { val, expr_result } => {
-                    self.binding(builder, val, expr_result)
+                    self.binding(builder, val, expr_result);
                 }
                 SemanticStackContext::ExpressionFunctionReturn { expr_result } => {
-                    self.expression_function_return(builder, expr_result)
+                    self.expression_function_return(builder, expr_result);
                 }
                 SemanticStackContext::ExpressionValue {
                     expression,
                     register_number,
                 } => self.expr_value(builder, expression, *register_number),
                 SemanticStackContext::FunctionArg { value, .. } => {
-                    self.func_arg(builder, &func_val, value, fn_decl)
+                    self.func_arg(builder, func_val, value, fn_decl);
                 }
                 _ => println!("-> {ctx:?}"),
             }
