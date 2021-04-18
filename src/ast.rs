@@ -1,11 +1,16 @@
+use anyhow::bail;
 use semantic_analyzer::ast;
 use semantic_analyzer::semantic::State;
+use semantic_analyzer::types::error::StateErrorResult;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
-pub enum AstError {}
+pub enum SemanticError {
+    #[error("Errors count: {:?}", .0.len())]
+    SemanticAnalyze(Vec<StateErrorResult>),
+}
 
-pub fn semantic_stack() -> State {
+pub fn semantic_stack() -> anyhow::Result<State> {
     let content: ast::Main = vec![ast::MainStatement::Function(ast::FunctionStatement {
         name: ast::FunctionName::new(ast::Ident::new("fn1")),
         result_type: ast::Type::Primitive(ast::PrimitiveTypes::I8),
@@ -58,6 +63,8 @@ pub fn semantic_stack() -> State {
     })];
     let mut state = State::new();
     state.run(&content);
-    assert!(state.errors.is_empty());
-    state
+    if !state.errors.is_empty() {
+        bail!(SemanticError::SemanticAnalyze(state.errors));
+    }
+    Ok(state)
 }
