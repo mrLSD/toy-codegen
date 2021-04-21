@@ -1,3 +1,8 @@
+//! # Function Codegen
+//! Function represented as a basic entity. There is two basic parts:
+//! - function declaration
+//! - function body codegen
+
 use inkwell::builder::Builder;
 use inkwell::context::Context;
 use inkwell::module::Module;
@@ -17,6 +22,8 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
+/// Codegen `ConstValue` representation.
+/// It contains only primitive-based types.
 #[derive(Clone)]
 pub enum ConstValue<'a> {
     Int(IntValue<'a>),
@@ -24,7 +31,6 @@ pub enum ConstValue<'a> {
     Bool(IntValue<'a>),
     Char(IntValue<'a>),
     String(ArrayValue<'a>),
-    #[allow(dead_code)]
     Pointer(PointerValue<'a>),
     None,
 }

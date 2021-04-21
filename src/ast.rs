@@ -1,16 +1,22 @@
+//! # Semantic State
+//! Semantic state generation based on semantic `AST`.
+
 use anyhow::bail;
 use semantic_analyzer::ast;
 use semantic_analyzer::semantic::State;
 use semantic_analyzer::types::error::StateErrorResult;
 use thiserror::Error;
 
+/// Semantic state processing errors
 #[derive(Debug, Error)]
 pub enum SemanticError {
     #[error("Errors count: {:?}", .0.len())]
     SemanticAnalyze(Vec<StateErrorResult>),
 }
 
-pub fn semantic_stack() -> anyhow::Result<State> {
+/// Init Semantic state. As source used custom semantic `AST`.
+/// And applied semantic-analyzer processing with result of `SemanticState`.
+pub fn semantic_state() -> anyhow::Result<State> {
     let content: ast::Main = vec![ast::MainStatement::Function(ast::FunctionStatement {
         name: ast::FunctionName::new(ast::Ident::new("fn1")),
         result_type: ast::Type::Primitive(ast::PrimitiveTypes::I8),

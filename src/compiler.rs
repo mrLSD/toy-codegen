@@ -1,3 +1,9 @@
+//! # Compiler
+//! Compile from `SemanticStateContext` source with LLVM codegen backend.
+//! Apply error flow.
+//!
+//! Save resultd to `.ll` source and `.o` binary.
+
 use crate::func::FuncCodegen;
 use anyhow::{anyhow, bail, ensure};
 use inkwell::context::Context;
@@ -59,11 +65,6 @@ fn get_native_target_machine() -> anyhow::Result<TargetMachine> {
         .ok_or_else(|| anyhow!(TargetError::CreateTargetMachine))
 }
 
-// pub struct Codegen<'a> {
-//     pub context: &'a Context,
-//     pub module: Module<'a>,
-// }
-
 /// # Compile processing.
 /// As a compilation source is `semantic_state` results.
 pub fn compile(semantic_state: &State) -> anyhow::Result<()> {
@@ -78,6 +79,7 @@ pub fn compile(semantic_state: &State) -> anyhow::Result<()> {
     );
     let ctx = semantic_state.context[0].clone();
 
+    // Init LLVM codegen variables
     let context = Context::create();
     let module = context.create_module("main");
     let builder = context.create_builder();
@@ -86,16 +88,18 @@ pub fn compile(semantic_state: &State) -> anyhow::Result<()> {
     for global_ctx in global_context {
         match &global_ctx {
             SemanticStackContext::FunctionDeclaration { fn_decl } => {
-                let mut fnv = FuncCodegen::new(&context);
-                fnv.fn_declaration(&module, fn_decl);
-                fnv.func_body(&builder, &ctx, fn_decl);
+                let mut fn_codegen = FuncCodegen::new(&context);
+                // Function declaration codegen
+                fn_codegen.fn_declaration(&module, fn_decl);
+                // Function body codegen
+                fn_codegen.func_body(&builder, &ctx, fn_decl);
             }
             _ => bail!(CompileError::UnexpectedGlobalInstruction(global_ctx)),
         }
     }
 
     // Get target machine and apply to LLVM-backend
-    let target_machine = get_native_target_machine().unwrap();
+    let target_machine = get_native_target_machine()?;
     apply_target_to_module(&target_machine, &module);
 
     // Store result to llvm-ir source file
