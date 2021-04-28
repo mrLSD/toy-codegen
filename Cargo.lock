@@ -175,7 +175,8 @@ checksum = "c08c74e62047bb2de4ff487b251e4a92e24f48745648451635cec7d591162d9f"
 [[package]]
 name = "semantic-analyzer"
 version = "0.3.2"
-source = "git+https://github.com/mrLSD/semantic-analyzer-rs.git?branch=feat/func-params#6c713fa08f793f2a88d117f4436acb35eacff69e"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dd48c49b84bfdf557b55a638c3e3296398268ffe44d8c0d210ed1e9e46d9bd05"
 dependencies = [
  "nom_locate",
 ]

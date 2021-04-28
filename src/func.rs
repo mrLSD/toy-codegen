@@ -3,6 +3,7 @@
 //! - function declaration
 //! - function body codegen
 
+use anyhow::anyhow;
 use inkwell::builder::Builder;
 use inkwell::context::Context;
 use inkwell::module::Module;
@@ -21,6 +22,7 @@ use semantic_analyzer::types::{FunctionStatement, PrimitiveValue, Value};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
+use thiserror::Error;
 
 /// Codegen `ConstValue` representation.
 /// It contains only primitive-based types.
@@ -33,6 +35,12 @@ pub enum ConstValue<'a> {
     String(ArrayValue<'a>),
     Pointer(PointerValue<'a>),
     None,
+}
+
+#[derive(Debug, Error)]
+pub enum FuncCodegenError {
+    #[error("FunctionValue not exist")]
+    FuncValueNotExist,
 }
 
 pub struct FuncCodegen<'ctx> {
@@ -50,10 +58,13 @@ impl<'ctx> FuncCodegen<'ctx> {
         }
     }
 
-    fn get_func(&self) -> FunctionValue<'ctx> {
-        self.func_val.unwrap()
+    /// Get codegen Func
+    fn get_func(&self) -> anyhow::Result<FunctionValue<'ctx>> {
+        self.func_val
+            .ok_or_else(|| anyhow!(FuncCodegenError::FuncValueNotExist))
     }
 
+    /// Set codegen Func
     fn set_func(&mut self, func_val: FunctionValue<'ctx>) {
         self.func_val = Some(func_val);
     }
@@ -147,8 +158,8 @@ impl<'ctx> FuncCodegen<'ctx> {
         &self,
         alloc_ty: BasicMetadataTypeEnum<'ctx>,
         name: &str,
-    ) -> PointerValue<'ctx> {
-        let func_val = self.get_func();
+    ) -> anyhow::Result<PointerValue<'ctx>> {
+        let func_val = self.get_func()?;
         let builder = self.context.create_builder();
         let entry = func_val.get_first_basic_block().unwrap();
 
@@ -157,7 +168,7 @@ impl<'ctx> FuncCodegen<'ctx> {
             |first_instr| builder.position_before(&first_instr),
         );
 
-        if alloc_ty.is_int_type() {
+        let res = if alloc_ty.is_int_type() {
             builder
                 .build_alloca(alloc_ty.into_int_type(), name)
                 .unwrap()
@@ -177,10 +188,11 @@ impl<'ctx> FuncCodegen<'ctx> {
             builder
                 .build_alloca(alloc_ty.into_struct_type(), name)
                 .unwrap()
-        }
+        };
+        Ok(res)
     }
 
-    fn _fn_init_params(&self, _builder: &Builder<'ctx>, fn_decl: &FunctionStatement) {
+    /*    fn _fn_init_params(&self, _builder: &Builder<'ctx>, fn_decl: &FunctionStatement) {
         let func_val = self.get_func();
         for (i, _arg) in func_val.get_param_iter().enumerate() {
             let param_name = fn_decl.parameters[i].to_string();
@@ -192,7 +204,7 @@ impl<'ctx> FuncCodegen<'ctx> {
                 _ => panic!("wrong param type"),
             };
         }
-    }
+    }*/
 
     fn expr_primitive_value(&self, primitive_val: &PrimitiveValue) -> ConstValue<'ctx> {
         match primitive_val {
@@ -386,17 +398,17 @@ impl<'ctx> FuncCodegen<'ctx> {
         builder: &Builder<'ctx>,
         let_decl: &Value,
         expr_result: &ExpressionResult,
-    ) {
+    ) -> anyhow::Result<()> {
         let name = let_decl.inner_name.to_string();
         let alloca = match &let_decl.inner_type {
             Type::Primitive(ty) => {
                 let ty_val: BasicMetadataTypeEnum = self.convert_meta_primitive_type(ty);
-                self.create_entry_block_alloca(ty_val, &name)
+                self.create_entry_block_alloca(ty_val, &name)?
             }
             _ => panic!("wrong param type {:?}", let_decl.inner_type),
         };
         // Set position for next instr
-        let entry = self.get_func().get_first_basic_block().unwrap();
+        let entry = self.get_func()?.get_first_basic_block().unwrap();
         builder.position_at_end(entry);
         let res_val = self.expr_value_operation(expr_result);
         match res_val {
@@ -413,6 +425,7 @@ impl<'ctx> FuncCodegen<'ctx> {
         };
         // Store to entities
         self.entities.insert(name, ConstValue::Pointer(alloca));
+        Ok(())
     }
 
     #[allow(clippy::unused_self)]
@@ -467,12 +480,12 @@ impl<'ctx> FuncCodegen<'ctx> {
         func_val: FunctionValue<'ctx>,
         value: &Value,
         fn_decl: &FunctionStatement,
-    ) {
+    ) -> anyhow::Result<()> {
         let value_name = value.inner_name.to_string();
         let alloca = match &value.inner_type {
             Type::Primitive(ty) => {
                 let ty_val: BasicMetadataTypeEnum = self.convert_meta_primitive_type(ty);
-                self.create_entry_block_alloca(ty_val, &value_name)
+                self.create_entry_block_alloca(ty_val, &value_name)?
             }
             _ => panic!("wrong param type {:?}", value.inner_type),
         };
@@ -492,6 +505,7 @@ impl<'ctx> FuncCodegen<'ctx> {
         // Store to entities
         self.entities
             .insert(value_name, ConstValue::Pointer(alloca));
+        Ok(())
     }
 
     pub fn func_body(
@@ -499,8 +513,8 @@ impl<'ctx> FuncCodegen<'ctx> {
         builder: &Builder<'ctx>,
         func_body: &Rc<RefCell<BlockState>>,
         fn_decl: &FunctionStatement,
-    ) {
-        let func_val = self.get_func();
+    ) -> anyhow::Result<()> {
+        let func_val = self.get_func()?;
         let entry = self.context.append_basic_block(func_val, "entry");
         builder.position_at_end(entry);
         //self.fn_init_params(builder, fn_decl);
@@ -526,7 +540,7 @@ impl<'ctx> FuncCodegen<'ctx> {
                 SemanticStackContext::LetBinding {
                     let_decl,
                     expr_result,
-                } => self.let_binding(builder, let_decl, expr_result),
+                } => self.let_binding(builder, let_decl, expr_result)?,
                 SemanticStackContext::Binding { val, expr_result } => {
                     self.binding(builder, val, expr_result);
                 }
@@ -538,10 +552,11 @@ impl<'ctx> FuncCodegen<'ctx> {
                     register_number,
                 } => self.expr_value(builder, expression, *register_number),
                 SemanticStackContext::FunctionArg { value, .. } => {
-                    self.func_arg(builder, func_val, value, fn_decl);
+                    self.func_arg(builder, func_val, value, fn_decl)?;
                 }
                 _ => println!("-> {ctx:?}"),
             }
         }
+        Ok(())
     }
 }
