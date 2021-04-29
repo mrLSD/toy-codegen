@@ -90,7 +90,7 @@ pub fn compile(semantic_state: &State) -> anyhow::Result<()> {
             SemanticStackContext::FunctionDeclaration { fn_decl } => {
                 let mut fn_codegen = FuncCodegen::new(&context);
                 // Function declaration codegen
-                fn_codegen.fn_declaration(&module, fn_decl);
+                fn_codegen.fn_declaration(&module, fn_decl)?;
                 // Function body codegen
                 fn_codegen.func_body(&builder, &ctx, fn_decl)?;
             }

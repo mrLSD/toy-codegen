@@ -3,15 +3,16 @@
 //! - function declaration
 //! - function body codegen
 
-use anyhow::anyhow;
+use anyhow::{anyhow, bail};
 use inkwell::builder::Builder;
 use inkwell::context::Context;
 use inkwell::module::Module;
 use inkwell::types::{
-    BasicMetadataTypeEnum, BasicTypeEnum, FloatType, FunctionType, IntType, StringRadix,
+    AnyTypeEnum, BasicMetadataTypeEnum, BasicTypeEnum, FunctionType, StringRadix,
 };
 use inkwell::values::{ArrayValue, FloatValue, FunctionValue, IntValue};
 use inkwell::values::{BasicValueEnum, PointerValue};
+use inkwell::AddressSpace;
 use semantic_analyzer::types::block_state::BlockState;
 use semantic_analyzer::types::expression::{
     ExpressionOperations, ExpressionResult, ExpressionResultValue,
@@ -41,6 +42,12 @@ pub enum ConstValue<'a> {
 pub enum FuncCodegenError {
     #[error("FunctionValue not exist")]
     FuncValueNotExist,
+    #[error("Failed convert type to LLVM: {0:?}")]
+    FailedConvertType(PrimitiveTypes),
+    #[error("Incompatible type for function parameter: {0:?}")]
+    IncompatibleTypeForFuncParam(Type),
+    #[error("Incompatible type for LetBinding: {0:?}")]
+    IncompatibleTypeForLetBinding(Type),
 }
 
 pub struct FuncCodegen<'ctx> {
@@ -69,22 +76,30 @@ impl<'ctx> FuncCodegen<'ctx> {
         self.func_val = Some(func_val);
     }
 
-    pub fn fn_declaration(&mut self, module: &Module<'ctx>, fn_decl: &FunctionStatement) {
-        let args_types = fn_decl
-            .parameters
-            .iter()
-            .map(|p| match &p.parameter_type {
-                Type::Primitive(ty) => self.convert_meta_primitive_type(ty),
-                _ => panic!("func param type currently can be only Type::Primitive"),
-            })
-            .collect::<Vec<BasicMetadataTypeEnum>>();
+    pub fn fn_declaration(
+        &mut self,
+        module: &Module<'ctx>,
+        fn_decl: &FunctionStatement,
+    ) -> anyhow::Result<()> {
+        let mut args_types: Vec<BasicMetadataTypeEnum> = vec![];
+        for param in &fn_decl.parameters {
+            let res = match &param.parameter_type {
+                Type::Primitive(ty) => self.convert_to_basic_meta_type(ty)?,
+                _ => bail!(FuncCodegenError::IncompatibleTypeForFuncParam(
+                    param.parameter_type.clone()
+                )),
+            };
+            args_types.push(res);
+        }
 
         let fn_type = match &fn_decl.result_type {
             Type::Primitive(ty) => self.get_fn_type(ty, &args_types),
             _ => panic!("func result type currently can be only Type::Primitive"),
         };
         let func_val = module.add_function(&fn_decl.name.to_string(), fn_type, None);
+
         self.set_func(func_val);
+
         for (i, arg) in func_val.get_param_iter().enumerate() {
             let param_name = fn_decl.parameters[i].to_string();
             match &fn_decl.parameters[i].parameter_type {
@@ -109,10 +124,11 @@ impl<'ctx> FuncCodegen<'ctx> {
                 _ => panic!("func param type currently can be only Type::Primitive"),
             }
         }
+        Ok(())
     }
 
     fn get_fn_type(
-        &self,
+        &mut self,
         ty: &PrimitiveTypes,
         param_types: &[BasicMetadataTypeEnum<'ctx>],
     ) -> FunctionType<'ctx> {
@@ -138,25 +154,49 @@ impl<'ctx> FuncCodegen<'ctx> {
         }
     }
 
-    fn convert_meta_primitive_type<T>(&self, ty: &PrimitiveTypes) -> T
-    where
-        T: From<IntType<'ctx>> + From<FloatType<'ctx>>,
-    {
+    /// Convert `PrimitiveType` to `AnyTypeEnum`
+    fn convert_to_any_type(&self, ty: &PrimitiveTypes) -> AnyTypeEnum<'ctx> {
         match ty {
-            PrimitiveTypes::I8 | PrimitiveTypes::U8 => self.context.i8_type().into(),
+            PrimitiveTypes::I8 | PrimitiveTypes::U8 | PrimitiveTypes::Char => {
+                self.context.i8_type().into()
+            }
             PrimitiveTypes::I16 | PrimitiveTypes::U16 => self.context.i16_type().into(),
             PrimitiveTypes::I32 | PrimitiveTypes::U32 => self.context.i32_type().into(),
             PrimitiveTypes::I64 | PrimitiveTypes::U64 => self.context.i64_type().into(),
             PrimitiveTypes::F32 => self.context.f32_type().into(),
             PrimitiveTypes::F64 => self.context.f64_type().into(),
             PrimitiveTypes::Bool => self.context.bool_type().into(),
-            _ => panic!("wrong primitive type {ty:?}"),
+            PrimitiveTypes::Ptr => self
+                .context
+                .i8_type()
+                .ptr_type(AddressSpace::default())
+                .into(),
+            PrimitiveTypes::None => self.context.void_type().into(),
+            PrimitiveTypes::String => self.context.i8_type().array_type(1).into(),
         }
+    }
+
+    /// Convert `PrimitiveType` to `BasicTypeEnum`
+    fn convert_to_basic_type(&self, ty: &PrimitiveTypes) -> anyhow::Result<BasicTypeEnum<'ctx>> {
+        self.convert_to_any_type(ty)
+            .try_into()
+            .map_err(|()| anyhow!(FuncCodegenError::FailedConvertType(ty.clone())))
+    }
+
+    /// Convert `PrimitiveType` to `BasicTypeEnum`
+    /// NOTE: do not implement `MetadataType`
+    fn convert_to_basic_meta_type(
+        &self,
+        ty: &PrimitiveTypes,
+    ) -> anyhow::Result<BasicMetadataTypeEnum<'ctx>> {
+        self.convert_to_any_type(ty)
+            .try_into()
+            .map_err(|()| anyhow!(FuncCodegenError::FailedConvertType(ty.clone())))
     }
 
     fn create_entry_block_alloca(
         &self,
-        alloc_ty: BasicMetadataTypeEnum<'ctx>,
+        alloc_ty: BasicTypeEnum<'ctx>,
         name: &str,
     ) -> anyhow::Result<PointerValue<'ctx>> {
         let func_val = self.get_func()?;
@@ -402,10 +442,12 @@ impl<'ctx> FuncCodegen<'ctx> {
         let name = let_decl.inner_name.to_string();
         let alloca = match &let_decl.inner_type {
             Type::Primitive(ty) => {
-                let ty_val: BasicMetadataTypeEnum = self.convert_meta_primitive_type(ty);
+                let ty_val = self.convert_to_basic_type(ty)?;
                 self.create_entry_block_alloca(ty_val, &name)?
             }
-            _ => panic!("wrong param type {:?}", let_decl.inner_type),
+            _ => bail!(FuncCodegenError::IncompatibleTypeForLetBinding(
+                let_decl.inner_type.clone()
+            )),
         };
         // Set position for next instr
         let entry = self.get_func()?.get_first_basic_block().unwrap();
@@ -445,8 +487,8 @@ impl<'ctx> FuncCodegen<'ctx> {
         let ConstValue::Pointer(pval) = entity else {
             panic!("value not pointer")
         };
-        let ty: BasicTypeEnum = match &expression.inner_type {
-            Type::Primitive(pty) => self.convert_meta_primitive_type(pty),
+        let ty = match &expression.inner_type {
+            Type::Primitive(pty) => self.convert_to_basic_type(pty).unwrap(),
             _ => panic!("operation type currently can be only Type::Primitive"),
         };
         let load_res = builder.build_load(ty, *pval, &name).unwrap();
@@ -484,7 +526,7 @@ impl<'ctx> FuncCodegen<'ctx> {
         let value_name = value.inner_name.to_string();
         let alloca = match &value.inner_type {
             Type::Primitive(ty) => {
-                let ty_val: BasicMetadataTypeEnum = self.convert_meta_primitive_type(ty);
+                let ty_val = self.convert_to_basic_type(ty)?;
                 self.create_entry_block_alloca(ty_val, &value_name)?
             }
             _ => panic!("wrong param type {:?}", value.inner_type),
