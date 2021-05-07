@@ -4,7 +4,7 @@
 //! - function body codegen
 
 use anyhow::{anyhow, bail};
-use inkwell::builder::Builder;
+use inkwell::builder::{Builder, BuilderError};
 use inkwell::context::Context;
 use inkwell::module::Module;
 use inkwell::types::{
@@ -38,6 +38,7 @@ pub enum ConstValue<'a> {
     None,
 }
 
+/// `FuncCodegen` errors coverage
 #[derive(Debug, Error)]
 pub enum FuncCodegenError {
     #[error("FunctionValue not exist")]
@@ -48,8 +49,21 @@ pub enum FuncCodegenError {
     IncompatibleTypeForFuncParam(Type),
     #[error("Incompatible type for LetBinding: {0:?}")]
     IncompatibleTypeForLetBinding(Type),
+    #[error("Wrong function return type: {0:?}")]
+    WrongFuncReturnType(Type),
+    #[error("Function parameter type None is deprecated")]
+    FuncParameterNoneTypeDeprecated,
+    #[error("Failed create function basic block")]
+    FailedCreateBasicBlock,
+    #[error("Failed generate build alloc: {0:?}")]
+    FailedBuildAlloc(BuilderError),
 }
 
+/// # Function codegen
+/// Contains:
+/// - `context` - LLVM context
+/// - `func_val` - LLVM function value as basic entity for function codegen
+/// - `entities` - map of functiob entities based on `ConstValue`
 pub struct FuncCodegen<'ctx> {
     pub context: &'ctx Context,
     pub func_val: Option<FunctionValue<'ctx>>,
@@ -71,64 +85,15 @@ impl<'ctx> FuncCodegen<'ctx> {
             .ok_or_else(|| anyhow!(FuncCodegenError::FuncValueNotExist))
     }
 
-    /// Set codegen Func
+    /// Set codegen Func.
+    /// Function-value - basic codegen entity for function.
     fn set_func(&mut self, func_val: FunctionValue<'ctx>) {
         self.func_val = Some(func_val);
     }
 
-    pub fn fn_declaration(
-        &mut self,
-        module: &Module<'ctx>,
-        fn_decl: &FunctionStatement,
-    ) -> anyhow::Result<()> {
-        let mut args_types: Vec<BasicMetadataTypeEnum> = vec![];
-        for param in &fn_decl.parameters {
-            let res = match &param.parameter_type {
-                Type::Primitive(ty) => self.convert_to_basic_meta_type(ty)?,
-                _ => bail!(FuncCodegenError::IncompatibleTypeForFuncParam(
-                    param.parameter_type.clone()
-                )),
-            };
-            args_types.push(res);
-        }
-
-        let fn_type = match &fn_decl.result_type {
-            Type::Primitive(ty) => self.get_fn_type(ty, &args_types),
-            _ => panic!("func result type currently can be only Type::Primitive"),
-        };
-        let func_val = module.add_function(&fn_decl.name.to_string(), fn_type, None);
-
-        self.set_func(func_val);
-
-        for (i, arg) in func_val.get_param_iter().enumerate() {
-            let param_name = fn_decl.parameters[i].to_string();
-            match &fn_decl.parameters[i].parameter_type {
-                Type::Primitive(ty) => match ty {
-                    PrimitiveTypes::I8
-                    | PrimitiveTypes::I16
-                    | PrimitiveTypes::I32
-                    | PrimitiveTypes::I64
-                    | PrimitiveTypes::U8
-                    | PrimitiveTypes::U16
-                    | PrimitiveTypes::U32
-                    | PrimitiveTypes::U64
-                    | PrimitiveTypes::Bool
-                    | PrimitiveTypes::Char => arg.into_int_value().set_name(&param_name),
-                    PrimitiveTypes::F32 | PrimitiveTypes::F64 => {
-                        arg.into_float_value().set_name(&param_name);
-                    }
-                    PrimitiveTypes::String => arg.into_struct_value().set_name(&param_name),
-                    PrimitiveTypes::Ptr => arg.into_pointer_value().set_name(&param_name),
-                    PrimitiveTypes::None => panic!("None: func parameter not supported"),
-                },
-                _ => panic!("func param type currently can be only Type::Primitive"),
-            }
-        }
-        Ok(())
-    }
-
+    /// Get LLVM function type with arguments and return type.
     fn get_fn_type(
-        &mut self,
+        &self,
         ty: &PrimitiveTypes,
         param_types: &[BasicMetadataTypeEnum<'ctx>],
     ) -> FunctionType<'ctx> {
@@ -150,8 +115,75 @@ impl<'ctx> FuncCodegen<'ctx> {
             PrimitiveTypes::Bool => self.context.bool_type().fn_type(param_types, false),
             PrimitiveTypes::String => self.context.metadata_type().fn_type(param_types, false),
             PrimitiveTypes::None => self.context.void_type().fn_type(param_types, false),
-            PrimitiveTypes::Ptr => panic!("function type Ptr not resolved"),
+            PrimitiveTypes::Ptr => self
+                .context
+                .i8_type()
+                .ptr_type(AddressSpace::default())
+                .fn_type(param_types, false),
         }
+    }
+
+    /// Function declaration
+    pub fn fn_declaration(
+        &mut self,
+        module: &Module<'ctx>,
+        fn_decl: &FunctionStatement,
+    ) -> anyhow::Result<()> {
+        // Prepare function argument types. For function-declaration
+        // we need only types
+        let mut args_types: Vec<BasicMetadataTypeEnum> = vec![];
+        for param in &fn_decl.parameters {
+            let res = match &param.parameter_type {
+                Type::Primitive(ty) => self.convert_to_basic_meta_type(ty)?,
+                _ => bail!(FuncCodegenError::IncompatibleTypeForFuncParam(
+                    param.parameter_type.clone()
+                )),
+            };
+            args_types.push(res);
+        }
+
+        // Get function declaration type
+        let fn_type = match &fn_decl.result_type {
+            Type::Primitive(ty) => self.get_fn_type(ty, &args_types),
+            _ => bail!(FuncCodegenError::WrongFuncReturnType(
+                fn_decl.result_type.clone()
+            )),
+        };
+        // Generate and set function-value - basic codegen entity for function
+        let func_val = module.add_function(&fn_decl.name.to_string(), fn_type, None);
+        self.set_func(func_val);
+
+        // Attach function parametres
+        for (i, arg) in func_val.get_param_iter().enumerate() {
+            let param_name = fn_decl.parameters[i].to_string();
+            let param_type = &fn_decl.parameters[i].parameter_type;
+            match param_type {
+                Type::Primitive(ty) => match ty {
+                    PrimitiveTypes::I8
+                    | PrimitiveTypes::I16
+                    | PrimitiveTypes::I32
+                    | PrimitiveTypes::I64
+                    | PrimitiveTypes::U8
+                    | PrimitiveTypes::U16
+                    | PrimitiveTypes::U32
+                    | PrimitiveTypes::U64
+                    | PrimitiveTypes::Bool
+                    | PrimitiveTypes::Char => arg.into_int_value().set_name(&param_name),
+                    PrimitiveTypes::F32 | PrimitiveTypes::F64 => {
+                        arg.into_float_value().set_name(&param_name);
+                    }
+                    PrimitiveTypes::String => arg.into_array_value().set_name(&param_name),
+                    PrimitiveTypes::Ptr => arg.into_pointer_value().set_name(&param_name),
+                    PrimitiveTypes::None => {
+                        bail!(FuncCodegenError::FuncParameterNoneTypeDeprecated)
+                    }
+                },
+                _ => bail!(FuncCodegenError::IncompatibleTypeForFuncParam(
+                    param_type.clone()
+                )),
+            }
+        }
+        Ok(())
     }
 
     /// Convert `PrimitiveType` to `AnyTypeEnum`
@@ -194,42 +226,49 @@ impl<'ctx> FuncCodegen<'ctx> {
             .map_err(|()| anyhow!(FuncCodegenError::FailedConvertType(ty.clone())))
     }
 
+    /// Create entry block alloca.
+    /// It's put `alloca` instructions in the top of function.
+    ///
+    /// ## Return
+    /// Return result - pointer value
     fn create_entry_block_alloca(
         &self,
         alloc_ty: BasicTypeEnum<'ctx>,
         name: &str,
     ) -> anyhow::Result<PointerValue<'ctx>> {
+        // Get function value
         let func_val = self.get_func()?;
+        // Create new builder
         let builder = self.context.create_builder();
-        let entry = func_val.get_first_basic_block().unwrap();
+        // Set entry point - basic block for codegen in the top of the
+        // function - first block
+        let entry = func_val
+            .get_first_basic_block()
+            .ok_or_else(|| FuncCodegenError::FailedCreateBasicBlock)?;
 
+        // Get first instruction on the block
         entry.get_first_instruction().map_or_else(
+            // If instruction exist
+            // If instruction doesn't exist - attach to end of the block
             || builder.position_at_end(entry),
+            // If instruction exist - attach before first instruction
             |first_instr| builder.position_before(&first_instr),
         );
 
+        // Depending of alloc type generate appropriate `alloca` instruction
         let res = if alloc_ty.is_int_type() {
-            builder
-                .build_alloca(alloc_ty.into_int_type(), name)
-                .unwrap()
+            builder.build_alloca(alloc_ty.into_int_type(), name)
         } else if alloc_ty.is_float_type() {
-            builder
-                .build_alloca(alloc_ty.into_float_type(), name)
-                .unwrap()
+            builder.build_alloca(alloc_ty.into_float_type(), name)
         } else if alloc_ty.is_array_type() {
-            builder
-                .build_alloca(alloc_ty.into_array_type(), name)
-                .unwrap()
+            builder.build_alloca(alloc_ty.into_array_type(), name)
         } else if alloc_ty.is_pointer_type() {
-            builder
-                .build_alloca(alloc_ty.into_pointer_type(), name)
-                .unwrap()
+            builder.build_alloca(alloc_ty.into_pointer_type(), name)
         } else {
-            builder
-                .build_alloca(alloc_ty.into_struct_type(), name)
-                .unwrap()
+            builder.build_alloca(alloc_ty.into_struct_type(), name)
         };
-        Ok(res)
+        // Wrap error
+        res.map_err(|err| anyhow!(FuncCodegenError::FailedBuildAlloc(err)))
     }
 
     /*    fn _fn_init_params(&self, _builder: &Builder<'ctx>, fn_decl: &FunctionStatement) {
