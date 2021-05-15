@@ -271,20 +271,6 @@ impl<'ctx> FuncCodegen<'ctx> {
         res.map_err(|err| anyhow!(FuncCodegenError::FailedBuildAlloc(err)))
     }
 
-    /*    fn _fn_init_params(&self, _builder: &Builder<'ctx>, fn_decl: &FunctionStatement) {
-        let func_val = self.get_func();
-        for (i, _arg) in func_val.get_param_iter().enumerate() {
-            let param_name = fn_decl.parameters[i].to_string();
-            let _alloca = match &fn_decl.parameters[i].parameter_type {
-                Type::Primitive(ty) => {
-                    let ty_val: BasicMetadataTypeEnum = self.convert_meta_primitive_type(ty);
-                    self.create_entry_block_alloca(ty_val, &param_name)
-                }
-                _ => panic!("wrong param type"),
-            };
-        }
-    }*/
-
     fn expr_primitive_value(&self, primitive_val: &PrimitiveValue) -> ConstValue<'ctx> {
         match primitive_val {
             PrimitiveValue::I8(val) => ConstValue::Int(
