@@ -57,6 +57,8 @@ pub enum FuncCodegenError {
     FailedCreateBasicBlock,
     #[error("Failed generate build alloc: {0:?}")]
     FailedBuildAlloc(BuilderError),
+    #[error("Failed convert IntValue for: {0}")]
+    FailedConvertIntVal(String),
 }
 
 /// # Function codegen
@@ -271,55 +273,80 @@ impl<'ctx> FuncCodegen<'ctx> {
         res.map_err(|err| anyhow!(FuncCodegenError::FailedBuildAlloc(err)))
     }
 
-    fn expr_primitive_value(&self, primitive_val: &PrimitiveValue) -> ConstValue<'ctx> {
-        match primitive_val {
+    /// Convert `PrimitiveValue` to to `ConstValue` with LLVM types.
+    /// For conversions used `String` - the resons for that:
+    /// - we don't need directly care about signed/unsigned case
+    /// - we don't need convert case ourself, as it can be not-trivial
+    /// in LLVM context. Doing it from string solves that issue
+    /// automatically.
+    fn convert_primitive_value(
+        &self,
+        primitive_val: &PrimitiveValue,
+    ) -> anyhow::Result<ConstValue<'ctx>> {
+        let res = match primitive_val {
             PrimitiveValue::I8(val) => ConstValue::Int(
                 self.context
                     .i8_type()
                     .const_int_from_string(&format!("{val:?}"), StringRadix::Decimal)
-                    .unwrap(),
+                    .ok_or_else(|| {
+                        anyhow!(FuncCodegenError::FailedConvertIntVal(format!("{val:?}")))
+                    })?,
             ),
             PrimitiveValue::I16(val) => ConstValue::Int(
                 self.context
                     .i16_type()
                     .const_int_from_string(&format!("{val:?}"), StringRadix::Decimal)
-                    .unwrap(),
+                    .ok_or_else(|| {
+                        anyhow!(FuncCodegenError::FailedConvertIntVal(format!("{val:?}")))
+                    })?,
             ),
             PrimitiveValue::I32(val) => ConstValue::Int(
                 self.context
                     .i32_type()
                     .const_int_from_string(&format!("{val:?}"), StringRadix::Decimal)
-                    .unwrap(),
+                    .ok_or_else(|| {
+                        anyhow!(FuncCodegenError::FailedConvertIntVal(format!("{val:?}")))
+                    })?,
             ),
             PrimitiveValue::I64(val) => ConstValue::Int(
                 self.context
                     .i64_type()
                     .const_int_from_string(&format!("{val:?}"), StringRadix::Decimal)
-                    .unwrap(),
+                    .ok_or_else(|| {
+                        anyhow!(FuncCodegenError::FailedConvertIntVal(format!("{val:?}")))
+                    })?,
             ),
             PrimitiveValue::U8(val) => ConstValue::Int(
                 self.context
                     .i8_type()
                     .const_int_from_string(&format!("{val:?}"), StringRadix::Decimal)
-                    .unwrap(),
+                    .ok_or_else(|| {
+                        anyhow!(FuncCodegenError::FailedConvertIntVal(format!("{val:?}")))
+                    })?,
             ),
             PrimitiveValue::U16(val) => ConstValue::Int(
                 self.context
                     .i16_type()
                     .const_int_from_string(&format!("{val:?}"), StringRadix::Decimal)
-                    .unwrap(),
+                    .ok_or_else(|| {
+                        anyhow!(FuncCodegenError::FailedConvertIntVal(format!("{val:?}")))
+                    })?,
             ),
             PrimitiveValue::U32(val) => ConstValue::Int(
                 self.context
                     .i32_type()
                     .const_int_from_string(&format!("{val:?}"), StringRadix::Decimal)
-                    .unwrap(),
+                    .ok_or_else(|| {
+                        anyhow!(FuncCodegenError::FailedConvertIntVal(format!("{val:?}")))
+                    })?,
             ),
             PrimitiveValue::U64(val) => ConstValue::Int(
                 self.context
                     .i64_type()
                     .const_int_from_string(&format!("{val:?}"), StringRadix::Decimal)
-                    .unwrap(),
+                    .ok_or_else(|| {
+                        anyhow!(FuncCodegenError::FailedConvertIntVal(format!("{val:?}")))
+                    })?,
             ),
             PrimitiveValue::F32(val) => ConstValue::Float(
                 self.context
@@ -342,12 +369,13 @@ impl<'ctx> FuncCodegen<'ctx> {
             }
             PrimitiveValue::Ptr => panic!("Pointer value not supported"),
             PrimitiveValue::None => ConstValue::None,
-        }
+        };
+        Ok(res)
     }
 
     fn expr_value_operation(&self, value: &ExpressionResult) -> ConstValue<'ctx> {
         match &value.expr_value {
-            ExpressionResultValue::PrimitiveValue(pv) => self.expr_primitive_value(pv),
+            ExpressionResultValue::PrimitiveValue(pv) => self.convert_primitive_value(pv).unwrap(),
             ExpressionResultValue::Register(reg) => {
                 self.entities
                     .get(&reg.to_string())
