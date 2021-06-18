@@ -59,6 +59,8 @@ pub enum FuncCodegenError {
     FailedBuildAlloc(BuilderError),
     #[error("Failed convert IntValue for: {0}")]
     FailedConvertIntVal(String),
+    #[error("Failed get entity for register: {0:?}")]
+    FailedGetEntityForRegister(u64),
 }
 
 /// # Function codegen
@@ -373,14 +375,19 @@ impl<'ctx> FuncCodegen<'ctx> {
         Ok(res)
     }
 
-    fn expr_value_operation(&self, value: &ExpressionResult) -> ConstValue<'ctx> {
-        match &value.expr_value {
-            ExpressionResultValue::PrimitiveValue(pv) => self.convert_primitive_value(pv).unwrap(),
+    /// Expression value result codegen.
+    /// It has 2 basic cases:
+    /// - `PrimitiveValue` - it just get LLVM const value, and return `ConstValue`
+    /// - `Register` - LLVM load valued from pre-defined entity map.
+    fn expr_value_result(&self, value: &ExpressionResultValue) -> anyhow::Result<ConstValue<'ctx>> {
+        match &value {
+            ExpressionResultValue::PrimitiveValue(pv) => self.convert_primitive_value(pv),
             ExpressionResultValue::Register(reg) => {
-                self.entities
+                let val = self
+                    .entities
                     .get(&reg.to_string())
-                    .expect("failed get entity")
-                    .clone()
+                    .ok_or_else(|| anyhow!(FuncCodegenError::FailedGetEntityForRegister(*reg)))?;
+                Ok(val.clone())
                 // let ty: BasicTypeEnum = match &value.expr_type {
                 //     Type::Primitive(pty) => self.convert_meta_primitive_type(pty),
                 //     _ => panic!("operation type currently can be only Type::Primitive"),
@@ -411,8 +418,8 @@ impl<'ctx> FuncCodegen<'ctx> {
         right_value: &ExpressionResult,
         register_number: u64,
     ) {
-        let const_left_value = self.expr_value_operation(left_value);
-        let const_right_value = self.expr_value_operation(right_value);
+        let const_left_value = self.expr_value_result(&left_value.expr_value).unwrap();
+        let const_right_value = self.expr_value_result(&right_value.expr_value).unwrap();
         let res = match operation {
             ExpressionOperations::Plus => {
                 if let (ConstValue::Int(lhs), ConstValue::Int(rhs)) =
@@ -472,7 +479,7 @@ impl<'ctx> FuncCodegen<'ctx> {
     }
 
     fn expression_function_return(&self, builder: &Builder<'ctx>, expr_result: &ExpressionResult) {
-        let ret = self.expr_value_operation(expr_result);
+        let ret = self.expr_value_result(&expr_result.expr_value).unwrap();
         match ret {
             ConstValue::Int(v) | ConstValue::Bool(v) | ConstValue::Char(v) => {
                 builder.build_return(Some(&v)).expect("return val")
@@ -505,7 +512,7 @@ impl<'ctx> FuncCodegen<'ctx> {
         // Set position for next instr
         let entry = self.get_func()?.get_first_basic_block().unwrap();
         builder.position_at_end(entry);
-        let res_val = self.expr_value_operation(expr_result);
+        let res_val = self.expr_value_result(&expr_result.expr_value).unwrap();
         match res_val {
             ConstValue::Int(val) | ConstValue::Bool(val) | ConstValue::Char(val) => {
                 builder.build_store(alloca, val).unwrap()
