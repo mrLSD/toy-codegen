@@ -61,6 +61,10 @@ pub enum FuncCodegenError {
     FailedConvertIntVal(String),
     #[error("Failed get entity for register: {0:?}")]
     FailedGetEntityForRegister(u64),
+    #[error("Unsupported expression operation value type")]
+    UnsupportedExpressionOperationValueType,
+    #[error("Unsupported expression operation kind")]
+    UnsupportedExpressionOperationKind,
 }
 
 /// # Function codegen
@@ -410,16 +414,34 @@ impl<'ctx> FuncCodegen<'ctx> {
         }
     }
 
+    /// Expression operation codegen.
+    /// Currently opererations possible only for 2 type subset:
+    /// - Int
+    /// - Float
+    /// Operations itself restricted to:
+    /// - Plus
+    /// - Minus
+    /// - Multiply
+    /// - Divide
+    /// Result is store as entity value with `RegisterNumber` key.
+    /// ## Parameters
+    /// - `builder` - function builder
+    /// - `operation` - expression operation result value
+    /// - `left_value_expr` - left expression result value
+    /// - `result_register_number` - register number as key for entity
+    /// where result will store
     fn expr_operation(
         &mut self,
         builder: &Builder<'ctx>,
         operation: &ExpressionOperations,
-        left_value: &ExpressionResult,
-        right_value: &ExpressionResult,
-        register_number: u64,
-    ) {
-        let const_left_value = self.expr_value_result(&left_value.expr_value).unwrap();
-        let const_right_value = self.expr_value_result(&right_value.expr_value).unwrap();
+        left_expr_value: &ExpressionResultValue,
+        right_expr_value: &ExpressionResultValue,
+        result_register_number: u64,
+    ) -> anyhow::Result<()> {
+        // Codegen for left expr
+        let const_left_value = self.expr_value_result(left_expr_value)?;
+        // Codegen for right expr
+        let const_right_value = self.expr_value_result(right_expr_value)?;
         let res = match operation {
             ExpressionOperations::Plus => {
                 if let (ConstValue::Int(lhs), ConstValue::Int(rhs)) =
@@ -431,7 +453,7 @@ impl<'ctx> FuncCodegen<'ctx> {
                 {
                     ConstValue::Float(builder.build_float_add(*lhs, *rhs, "tmp_add").unwrap())
                 } else {
-                    panic!("unsupported type for operation");
+                    bail!(FuncCodegenError::UnsupportedExpressionOperationValueType);
                 }
             }
             ExpressionOperations::Minus => {
@@ -444,7 +466,7 @@ impl<'ctx> FuncCodegen<'ctx> {
                 {
                     ConstValue::Float(builder.build_float_sub(*lhs, *rhs, "tmp_sub").unwrap())
                 } else {
-                    panic!("unsupported type for operation ");
+                    bail!(FuncCodegenError::UnsupportedExpressionOperationValueType);
                 }
             }
             ExpressionOperations::Multiply => {
@@ -457,7 +479,7 @@ impl<'ctx> FuncCodegen<'ctx> {
                 {
                     ConstValue::Float(builder.build_float_mul(*lhs, *rhs, "tmp_mul").unwrap())
                 } else {
-                    panic!("unsupported type for operation ");
+                    bail!(FuncCodegenError::UnsupportedExpressionOperationValueType);
                 }
             }
             ExpressionOperations::Divide => {
@@ -470,12 +492,14 @@ impl<'ctx> FuncCodegen<'ctx> {
                 {
                     ConstValue::Float(builder.build_float_div(*lhs, *rhs, "tmp_div").unwrap())
                 } else {
-                    panic!("unsupported type for operation ");
+                    bail!(FuncCodegenError::UnsupportedExpressionOperationValueType);
                 }
             }
-            _ => panic!("only restricted kind of operations"),
+            _ => bail!(FuncCodegenError::UnsupportedExpressionOperationKind),
         };
-        self.entities.insert(register_number.to_string(), res);
+        self.entities
+            .insert(result_register_number.to_string(), res);
+        Ok(())
     }
 
     fn expression_function_return(&self, builder: &Builder<'ctx>, expr_result: &ExpressionResult) {
@@ -634,10 +658,10 @@ impl<'ctx> FuncCodegen<'ctx> {
                     self.expr_operation(
                         builder,
                         operation,
-                        left_value,
-                        right_value,
+                        &left_value.expr_value,
+                        &right_value.expr_value,
                         *register_number,
-                    );
+                    )?;
                 }
                 SemanticStackContext::LetBinding {
                     let_decl,
