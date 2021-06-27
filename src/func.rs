@@ -4,7 +4,7 @@
 //! - function body codegen
 
 use anyhow::{anyhow, bail};
-use inkwell::builder::Builder;
+use inkwell::builder::{Builder, BuilderError};
 use inkwell::context::Context;
 use inkwell::module::Module;
 use inkwell::types::{
@@ -53,6 +53,22 @@ pub enum FuncCodegenError {
     WrongFuncReturnType(Type),
     #[error("Function parameter type None is deprecated")]
     FuncParameterNoneTypeDeprecated,
+    #[error("Failed create function basic block")]
+    FailedCreateBasicBlock,
+    #[error("Failed generate build alloc: {0:?}")]
+    FailedBuildAlloc(BuilderError),
+    #[error("Failed convert IntValue for: {0}")]
+    FailedConvertIntVal(String),
+    #[error("Failed get entity for register: {0:?}")]
+    FailedGetEntityForRegister(u64),
+    #[error("Unsupported expression operation value type")]
+    UnsupportedExpressionOperationValueType,
+    #[error("Unsupported expression operation kind")]
+    UnsupportedExpressionOperationKind,
+    #[error("Failed generate  Build return: {0:?}")]
+    FailedBuildReturn(BuilderError),
+    #[error("Binding value not found: {0}")]
+    BindingValueNotFound(String),
 }
 
 /// # Function codegen
@@ -87,9 +103,9 @@ impl<'ctx> FuncCodegen<'ctx> {
         self.func_val = Some(func_val);
     }
 
-    /// Get LLVM function type
+    /// Get LLVM function type with arguments and return type.
     fn get_fn_type(
-        &mut self,
+        &self,
         ty: &PrimitiveTypes,
         param_types: &[BasicMetadataTypeEnum<'ctx>],
     ) -> FunctionType<'ctx> {
@@ -111,7 +127,11 @@ impl<'ctx> FuncCodegen<'ctx> {
             PrimitiveTypes::Bool => self.context.bool_type().fn_type(param_types, false),
             PrimitiveTypes::String => self.context.metadata_type().fn_type(param_types, false),
             PrimitiveTypes::None => self.context.void_type().fn_type(param_types, false),
-            PrimitiveTypes::Ptr => panic!("function type Ptr not resolved"),
+            PrimitiveTypes::Ptr => self
+                .context
+                .i8_type()
+                .ptr_type(AddressSpace::default())
+                .fn_type(param_types, false),
         }
     }
 
@@ -218,107 +238,125 @@ impl<'ctx> FuncCodegen<'ctx> {
             .map_err(|()| anyhow!(FuncCodegenError::FailedConvertType(ty.clone())))
     }
 
+    /// Create entry block alloca.
+    /// It's put `alloca` instructions in the top of function.
+    ///
+    /// ## Return
+    /// Return result - pointer value
     fn create_entry_block_alloca(
         &self,
         alloc_ty: BasicTypeEnum<'ctx>,
         name: &str,
     ) -> anyhow::Result<PointerValue<'ctx>> {
+        // Get function value
         let func_val = self.get_func()?;
+        // Create new builder
         let builder = self.context.create_builder();
-        let entry = func_val.get_first_basic_block().unwrap();
+        // Set entry point - basic block for codegen in the top of the
+        // function - first block
+        let entry = func_val
+            .get_first_basic_block()
+            .ok_or_else(|| FuncCodegenError::FailedCreateBasicBlock)?;
 
+        // Get first instruction on the block
         entry.get_first_instruction().map_or_else(
+            // If instruction exist
+            // If instruction doesn't exist - attach to end of the block
             || builder.position_at_end(entry),
+            // If instruction exist - attach before first instruction
             |first_instr| builder.position_before(&first_instr),
         );
 
+        // Depending of alloc type generate appropriate `alloca` instruction
         let res = if alloc_ty.is_int_type() {
-            builder
-                .build_alloca(alloc_ty.into_int_type(), name)
-                .unwrap()
+            builder.build_alloca(alloc_ty.into_int_type(), name)
         } else if alloc_ty.is_float_type() {
-            builder
-                .build_alloca(alloc_ty.into_float_type(), name)
-                .unwrap()
+            builder.build_alloca(alloc_ty.into_float_type(), name)
         } else if alloc_ty.is_array_type() {
-            builder
-                .build_alloca(alloc_ty.into_array_type(), name)
-                .unwrap()
+            builder.build_alloca(alloc_ty.into_array_type(), name)
         } else if alloc_ty.is_pointer_type() {
-            builder
-                .build_alloca(alloc_ty.into_pointer_type(), name)
-                .unwrap()
+            builder.build_alloca(alloc_ty.into_pointer_type(), name)
         } else {
-            builder
-                .build_alloca(alloc_ty.into_struct_type(), name)
-                .unwrap()
+            builder.build_alloca(alloc_ty.into_struct_type(), name)
         };
-        Ok(res)
+        // Wrap error
+        res.map_err(|err| anyhow!(FuncCodegenError::FailedBuildAlloc(err)))
     }
 
-    /*    fn _fn_init_params(&self, _builder: &Builder<'ctx>, fn_decl: &FunctionStatement) {
-        let func_val = self.get_func();
-        for (i, _arg) in func_val.get_param_iter().enumerate() {
-            let param_name = fn_decl.parameters[i].to_string();
-            let _alloca = match &fn_decl.parameters[i].parameter_type {
-                Type::Primitive(ty) => {
-                    let ty_val: BasicMetadataTypeEnum = self.convert_meta_primitive_type(ty);
-                    self.create_entry_block_alloca(ty_val, &param_name)
-                }
-                _ => panic!("wrong param type"),
-            };
-        }
-    }*/
-
-    fn expr_primitive_value(&self, primitive_val: &PrimitiveValue) -> ConstValue<'ctx> {
-        match primitive_val {
+    /// Convert `PrimitiveValue` to to `ConstValue` with LLVM types.
+    /// For conversions used `String` - the resons for that:
+    /// - we don't need directly care about signed/unsigned case
+    /// - we don't need convert case ourself, as it can be not-trivial
+    /// in LLVM context. Doing it from string solves that issue
+    /// automatically.
+    fn convert_primitive_value(
+        &self,
+        primitive_val: &PrimitiveValue,
+    ) -> anyhow::Result<ConstValue<'ctx>> {
+        let res = match primitive_val {
             PrimitiveValue::I8(val) => ConstValue::Int(
                 self.context
                     .i8_type()
                     .const_int_from_string(&format!("{val:?}"), StringRadix::Decimal)
-                    .unwrap(),
+                    .ok_or_else(|| {
+                        anyhow!(FuncCodegenError::FailedConvertIntVal(format!("{val:?}")))
+                    })?,
             ),
             PrimitiveValue::I16(val) => ConstValue::Int(
                 self.context
                     .i16_type()
                     .const_int_from_string(&format!("{val:?}"), StringRadix::Decimal)
-                    .unwrap(),
+                    .ok_or_else(|| {
+                        anyhow!(FuncCodegenError::FailedConvertIntVal(format!("{val:?}")))
+                    })?,
             ),
             PrimitiveValue::I32(val) => ConstValue::Int(
                 self.context
                     .i32_type()
                     .const_int_from_string(&format!("{val:?}"), StringRadix::Decimal)
-                    .unwrap(),
+                    .ok_or_else(|| {
+                        anyhow!(FuncCodegenError::FailedConvertIntVal(format!("{val:?}")))
+                    })?,
             ),
             PrimitiveValue::I64(val) => ConstValue::Int(
                 self.context
                     .i64_type()
                     .const_int_from_string(&format!("{val:?}"), StringRadix::Decimal)
-                    .unwrap(),
+                    .ok_or_else(|| {
+                        anyhow!(FuncCodegenError::FailedConvertIntVal(format!("{val:?}")))
+                    })?,
             ),
             PrimitiveValue::U8(val) => ConstValue::Int(
                 self.context
                     .i8_type()
                     .const_int_from_string(&format!("{val:?}"), StringRadix::Decimal)
-                    .unwrap(),
+                    .ok_or_else(|| {
+                        anyhow!(FuncCodegenError::FailedConvertIntVal(format!("{val:?}")))
+                    })?,
             ),
             PrimitiveValue::U16(val) => ConstValue::Int(
                 self.context
                     .i16_type()
                     .const_int_from_string(&format!("{val:?}"), StringRadix::Decimal)
-                    .unwrap(),
+                    .ok_or_else(|| {
+                        anyhow!(FuncCodegenError::FailedConvertIntVal(format!("{val:?}")))
+                    })?,
             ),
             PrimitiveValue::U32(val) => ConstValue::Int(
                 self.context
                     .i32_type()
                     .const_int_from_string(&format!("{val:?}"), StringRadix::Decimal)
-                    .unwrap(),
+                    .ok_or_else(|| {
+                        anyhow!(FuncCodegenError::FailedConvertIntVal(format!("{val:?}")))
+                    })?,
             ),
             PrimitiveValue::U64(val) => ConstValue::Int(
                 self.context
                     .i64_type()
                     .const_int_from_string(&format!("{val:?}"), StringRadix::Decimal)
-                    .unwrap(),
+                    .ok_or_else(|| {
+                        anyhow!(FuncCodegenError::FailedConvertIntVal(format!("{val:?}")))
+                    })?,
             ),
             PrimitiveValue::F32(val) => ConstValue::Float(
                 self.context
@@ -341,49 +379,55 @@ impl<'ctx> FuncCodegen<'ctx> {
             }
             PrimitiveValue::Ptr => panic!("Pointer value not supported"),
             PrimitiveValue::None => ConstValue::None,
-        }
+        };
+        Ok(res)
     }
 
-    fn expr_value_operation(&self, value: &ExpressionResult) -> ConstValue<'ctx> {
-        match &value.expr_value {
-            ExpressionResultValue::PrimitiveValue(pv) => self.expr_primitive_value(pv),
+    /// Expression value result codegen.
+    /// It has 2 basic cases:
+    /// - `PrimitiveValue` - it just get LLVM const value, and return `ConstValue`
+    /// - `Register` - LLVM load valued from pre-defined entity map.
+    fn expr_value_result(&self, value: &ExpressionResultValue) -> anyhow::Result<ConstValue<'ctx>> {
+        match &value {
+            ExpressionResultValue::PrimitiveValue(pv) => self.convert_primitive_value(pv),
             ExpressionResultValue::Register(reg) => {
-                self.entities
+                let val = self
+                    .entities
                     .get(&reg.to_string())
-                    .expect("failed get entity")
-                    .clone()
-                // let ty: BasicTypeEnum = match &value.expr_type {
-                //     Type::Primitive(pty) => self.convert_meta_primitive_type(pty),
-                //     _ => panic!("operation type currently can be only Type::Primitive"),
-                // };
-                // let pval = builder.build_load(ty, *val, "left_val").unwrap();
-                // match &value.expr_type {
-                //     Type::Primitive(pty) => match pty {
-                //         PrimitiveTypes::I8
-                //         | PrimitiveTypes::I16
-                //         | PrimitiveTypes::I32
-                //         | PrimitiveTypes::I64 => ConstValue::Int(pval.into_int_value()),
-                //         PrimitiveTypes::F32 | PrimitiveTypes::F64 => {
-                //             ConstValue::Float(pval.into_float_value())
-                //         }
-                //         _ => panic!("operation type currently can be only Type::Primitive"),
-                //     },
-                //     _ => panic!("operation type currently can be only Type::Primitive"),
-                // }
+                    .ok_or_else(|| anyhow!(FuncCodegenError::FailedGetEntityForRegister(*reg)))?;
+                Ok(val.clone())
             }
         }
     }
 
+    /// Expression operation codegen.
+    /// Currently opererations possible only for 2 type subset:
+    /// - Int
+    /// - Float
+    /// Operations itself restricted to:
+    /// - Plus
+    /// - Minus
+    /// - Multiply
+    /// - Divide
+    /// Result is store as entity value with `RegisterNumber` key.
+    /// ## Parameters
+    /// - `builder` - function builder
+    /// - `operation` - expression operation result value
+    /// - `left_value_expr` - left expression result value
+    /// - `result_register_number` - register number as key for entity
+    /// where result will store
     fn expr_operation(
         &mut self,
         builder: &Builder<'ctx>,
         operation: &ExpressionOperations,
-        left_value: &ExpressionResult,
-        right_value: &ExpressionResult,
-        register_number: u64,
-    ) {
-        let const_left_value = self.expr_value_operation(left_value);
-        let const_right_value = self.expr_value_operation(right_value);
+        left_expr_value: &ExpressionResultValue,
+        right_expr_value: &ExpressionResultValue,
+        result_register_number: u64,
+    ) -> anyhow::Result<()> {
+        // Codegen for left expr
+        let const_left_value = self.expr_value_result(left_expr_value)?;
+        // Codegen for right expr
+        let const_right_value = self.expr_value_result(right_expr_value)?;
         let res = match operation {
             ExpressionOperations::Plus => {
                 if let (ConstValue::Int(lhs), ConstValue::Int(rhs)) =
@@ -395,7 +439,7 @@ impl<'ctx> FuncCodegen<'ctx> {
                 {
                     ConstValue::Float(builder.build_float_add(*lhs, *rhs, "tmp_add").unwrap())
                 } else {
-                    panic!("unsupported type for operation");
+                    bail!(FuncCodegenError::UnsupportedExpressionOperationValueType);
                 }
             }
             ExpressionOperations::Minus => {
@@ -408,7 +452,7 @@ impl<'ctx> FuncCodegen<'ctx> {
                 {
                     ConstValue::Float(builder.build_float_sub(*lhs, *rhs, "tmp_sub").unwrap())
                 } else {
-                    panic!("unsupported type for operation ");
+                    bail!(FuncCodegenError::UnsupportedExpressionOperationValueType);
                 }
             }
             ExpressionOperations::Multiply => {
@@ -421,7 +465,7 @@ impl<'ctx> FuncCodegen<'ctx> {
                 {
                     ConstValue::Float(builder.build_float_mul(*lhs, *rhs, "tmp_mul").unwrap())
                 } else {
-                    panic!("unsupported type for operation ");
+                    bail!(FuncCodegenError::UnsupportedExpressionOperationValueType);
                 }
             }
             ExpressionOperations::Divide => {
@@ -434,27 +478,44 @@ impl<'ctx> FuncCodegen<'ctx> {
                 {
                     ConstValue::Float(builder.build_float_div(*lhs, *rhs, "tmp_div").unwrap())
                 } else {
-                    panic!("unsupported type for operation ");
+                    bail!(FuncCodegenError::UnsupportedExpressionOperationValueType);
                 }
             }
-            _ => panic!("only restricted kind of operations"),
+            _ => bail!(FuncCodegenError::UnsupportedExpressionOperationKind),
         };
-        self.entities.insert(register_number.to_string(), res);
+        self.entities
+            .insert(result_register_number.to_string(), res);
+        Ok(())
     }
 
-    fn expression_function_return(&self, builder: &Builder<'ctx>, expr_result: &ExpressionResult) {
-        let ret = self.expr_value_operation(expr_result);
-        match ret {
-            ConstValue::Int(v) | ConstValue::Bool(v) | ConstValue::Char(v) => {
-                builder.build_return(Some(&v)).expect("return val")
-            }
-
-            ConstValue::Float(v) => builder.build_return(Some(&v)).expect("return val"),
-
-            ConstValue::String(v) => builder.build_return(Some(&v)).expect("return val"),
-            ConstValue::Pointer(p) => builder.build_return(Some(&p)).expect("return val"),
-            ConstValue::None => builder.build_return(None).expect("return val"),
-        };
+    /// Expression function return codegen.
+    /// ## Parameters:
+    /// - `builder` - function builder
+    /// - `expr_result_val` - expression result value that
+    /// should be return in `Ret` function instruction,
+    fn expr_function_return(
+        &self,
+        builder: &Builder<'ctx>,
+        expr_result_val: &ExpressionResultValue,
+    ) -> anyhow::Result<()> {
+        match self.expr_value_result(expr_result_val)? {
+            ConstValue::Int(v) | ConstValue::Bool(v) | ConstValue::Char(v) => builder
+                .build_return(Some(&v))
+                .map_err(|err| anyhow!(FuncCodegenError::FailedBuildReturn(err))),
+            ConstValue::Float(v) => builder
+                .build_return(Some(&v))
+                .map_err(|err| anyhow!(FuncCodegenError::FailedBuildReturn(err))),
+            ConstValue::String(v) => builder
+                .build_return(Some(&v))
+                .map_err(|err| anyhow!(FuncCodegenError::FailedBuildReturn(err))),
+            ConstValue::Pointer(p) => builder
+                .build_return(Some(&p))
+                .map_err(|err| anyhow!(FuncCodegenError::FailedBuildReturn(err))),
+            ConstValue::None => builder
+                .build_return(None)
+                .map_err(|err| anyhow!(FuncCodegenError::FailedBuildReturn(err))),
+        }?;
+        Ok(())
     }
 
     fn let_binding(
@@ -473,10 +534,10 @@ impl<'ctx> FuncCodegen<'ctx> {
                 let_decl.inner_type.clone()
             )),
         };
-        // Set position for next instr
+        // Set position for next instruction
         let entry = self.get_func()?.get_first_basic_block().unwrap();
         builder.position_at_end(entry);
-        let res_val = self.expr_value_operation(expr_result);
+        let res_val = self.expr_value_result(&expr_result.expr_value).unwrap();
         match res_val {
             ConstValue::Int(val) | ConstValue::Bool(val) | ConstValue::Char(val) => {
                 builder.build_store(alloca, val).unwrap()
@@ -494,14 +555,41 @@ impl<'ctx> FuncCodegen<'ctx> {
         Ok(())
     }
 
-    #[allow(clippy::unused_self)]
-    const fn binding(
+    fn binding(
         &self,
-        _builder: &Builder<'ctx>,
-        _val: &Value,
-        _expr_result: &ExpressionResult,
-    ) {
-        //STORE
+        builder: &Builder<'ctx>,
+        val: &Value,
+        expr_result: &ExpressionResult,
+    ) -> anyhow::Result<()> {
+        let name = val.inner_name.to_string();
+        let alloca_value = self
+            .entities
+            .get(&name)
+            .ok_or(anyhow!(FuncCodegenError::BindingValueNotFound(
+                name.clone()
+            )))?
+            .clone();
+        let ConstValue::Pointer(alloca) = alloca_value else {
+            bail!(FuncCodegenError::BindingValueNotFound(name))
+        };
+
+        // Set position for next instruction
+        let entry = self.get_func()?.get_first_basic_block().unwrap();
+        builder.position_at_end(entry);
+        let res_val = self.expr_value_result(&expr_result.expr_value).unwrap();
+        match res_val {
+            ConstValue::Int(val) | ConstValue::Bool(val) | ConstValue::Char(val) => {
+                builder.build_store(alloca, val).unwrap()
+            }
+            ConstValue::Float(val) => builder.build_store(alloca, val).unwrap(),
+            ConstValue::String(val) => builder.build_store(alloca, val).unwrap(),
+            ConstValue::Pointer(val) => builder.build_store(alloca, val).unwrap(),
+            // For None just store ZERO
+            ConstValue::None => builder
+                .build_store(alloca, self.context.i8_type().const_zero())
+                .unwrap(),
+        };
+        Ok(())
     }
 
     fn expr_value(&mut self, builder: &Builder<'ctx>, expression: &Value, register_number: u64) {
@@ -598,20 +686,20 @@ impl<'ctx> FuncCodegen<'ctx> {
                     self.expr_operation(
                         builder,
                         operation,
-                        left_value,
-                        right_value,
+                        &left_value.expr_value,
+                        &right_value.expr_value,
                         *register_number,
-                    );
+                    )?;
                 }
                 SemanticStackContext::LetBinding {
                     let_decl,
                     expr_result,
                 } => self.let_binding(builder, let_decl, expr_result)?,
                 SemanticStackContext::Binding { val, expr_result } => {
-                    self.binding(builder, val, expr_result);
+                    self.binding(builder, val, expr_result)?;
                 }
                 SemanticStackContext::ExpressionFunctionReturn { expr_result } => {
-                    self.expression_function_return(builder, expr_result);
+                    self.expr_function_return(builder, &expr_result.expr_value)?;
                 }
                 SemanticStackContext::ExpressionValue {
                     expression,
