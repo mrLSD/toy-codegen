@@ -65,6 +65,8 @@ pub enum FuncCodegenError {
     UnsupportedExpressionOperationValueType,
     #[error("Unsupported expression operation kind")]
     UnsupportedExpressionOperationKind,
+    #[error("Failed generate  Build return: {0:?}")]
+    FailedBuildReturn(BuilderError),
 }
 
 /// # Function codegen
@@ -392,24 +394,6 @@ impl<'ctx> FuncCodegen<'ctx> {
                     .get(&reg.to_string())
                     .ok_or_else(|| anyhow!(FuncCodegenError::FailedGetEntityForRegister(*reg)))?;
                 Ok(val.clone())
-                // let ty: BasicTypeEnum = match &value.expr_type {
-                //     Type::Primitive(pty) => self.convert_meta_primitive_type(pty),
-                //     _ => panic!("operation type currently can be only Type::Primitive"),
-                // };
-                // let pval = builder.build_load(ty, *val, "left_val").unwrap();
-                // match &value.expr_type {
-                //     Type::Primitive(pty) => match pty {
-                //         PrimitiveTypes::I8
-                //         | PrimitiveTypes::I16
-                //         | PrimitiveTypes::I32
-                //         | PrimitiveTypes::I64 => ConstValue::Int(pval.into_int_value()),
-                //         PrimitiveTypes::F32 | PrimitiveTypes::F64 => {
-                //             ConstValue::Float(pval.into_float_value())
-                //         }
-                //         _ => panic!("operation type currently can be only Type::Primitive"),
-                //     },
-                //     _ => panic!("operation type currently can be only Type::Primitive"),
-                // }
             }
         }
     }
@@ -502,19 +486,34 @@ impl<'ctx> FuncCodegen<'ctx> {
         Ok(())
     }
 
-    fn expression_function_return(&self, builder: &Builder<'ctx>, expr_result: &ExpressionResult) {
-        let ret = self.expr_value_result(&expr_result.expr_value).unwrap();
-        match ret {
-            ConstValue::Int(v) | ConstValue::Bool(v) | ConstValue::Char(v) => {
-                builder.build_return(Some(&v)).expect("return val")
-            }
-
-            ConstValue::Float(v) => builder.build_return(Some(&v)).expect("return val"),
-
-            ConstValue::String(v) => builder.build_return(Some(&v)).expect("return val"),
-            ConstValue::Pointer(p) => builder.build_return(Some(&p)).expect("return val"),
-            ConstValue::None => builder.build_return(None).expect("return val"),
-        };
+    /// Expression function return codegen.
+    /// ## Parameters:
+    /// - `builder` - function builder
+    /// - `expr_result_val` - expression result value that
+    /// should be return in `Ret` function instruction,
+    fn expr_function_return(
+        &self,
+        builder: &Builder<'ctx>,
+        expr_result_val: &ExpressionResultValue,
+    ) -> anyhow::Result<()> {
+        match self.expr_value_result(expr_result_val)? {
+            ConstValue::Int(v) | ConstValue::Bool(v) | ConstValue::Char(v) => builder
+                .build_return(Some(&v))
+                .map_err(|err| anyhow!(FuncCodegenError::FailedBuildReturn(err))),
+            ConstValue::Float(v) => builder
+                .build_return(Some(&v))
+                .map_err(|err| anyhow!(FuncCodegenError::FailedBuildReturn(err))),
+            ConstValue::String(v) => builder
+                .build_return(Some(&v))
+                .map_err(|err| anyhow!(FuncCodegenError::FailedBuildReturn(err))),
+            ConstValue::Pointer(p) => builder
+                .build_return(Some(&p))
+                .map_err(|err| anyhow!(FuncCodegenError::FailedBuildReturn(err))),
+            ConstValue::None => builder
+                .build_return(None)
+                .map_err(|err| anyhow!(FuncCodegenError::FailedBuildReturn(err))),
+        }?;
+        Ok(())
     }
 
     fn let_binding(
@@ -533,7 +532,7 @@ impl<'ctx> FuncCodegen<'ctx> {
                 let_decl.inner_type.clone()
             )),
         };
-        // Set position for next instr
+        // Set position for next instruction
         let entry = self.get_func()?.get_first_basic_block().unwrap();
         builder.position_at_end(entry);
         let res_val = self.expr_value_result(&expr_result.expr_value).unwrap();
@@ -671,7 +670,7 @@ impl<'ctx> FuncCodegen<'ctx> {
                     self.binding(builder, val, expr_result);
                 }
                 SemanticStackContext::ExpressionFunctionReturn { expr_result } => {
-                    self.expression_function_return(builder, expr_result);
+                    self.expr_function_return(builder, &expr_result.expr_value)?;
                 }
                 SemanticStackContext::ExpressionValue {
                     expression,

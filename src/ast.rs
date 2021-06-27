@@ -3,6 +3,7 @@
 
 use anyhow::bail;
 use semantic_analyzer::ast;
+use semantic_analyzer::ast::Ident;
 use semantic_analyzer::semantic::State;
 use semantic_analyzer::types::error::StateErrorResult;
 use thiserror::Error;
@@ -36,10 +37,18 @@ pub fn semantic_state() -> anyhow::Result<State> {
                     operation: Some((
                         ast::ExpressionOperations::Plus,
                         Box::new(ast::Expression {
-                            expression_value: ast::ExpressionValue::PrimitiveValue(
-                                ast::PrimitiveValue::I8(1),
-                            ),
-                            operation: None,
+                            expression_value: ast::ExpressionValue::ValueName(ast::ValueName::new(
+                                Ident::new("x"),
+                            )),
+                            operation: Some((
+                                ast::ExpressionOperations::Multiply,
+                                Box::new(ast::Expression {
+                                    expression_value: ast::ExpressionValue::PrimitiveValue(
+                                        ast::PrimitiveValue::I8(2),
+                                    ),
+                                    operation: None,
+                                }),
+                            )),
                         }),
                     )),
                 }),
@@ -51,11 +60,11 @@ pub fn semantic_state() -> anyhow::Result<State> {
                         ast::Ident::new("y"),
                     )),
                     operation: Some((
-                        ast::ExpressionOperations::Minus,
+                        ast::ExpressionOperations::Plus,
                         Box::new(ast::Expression {
-                            expression_value: ast::ExpressionValue::PrimitiveValue(
-                                ast::PrimitiveValue::I8(20),
-                            ),
+                            expression_value: ast::ExpressionValue::ValueName(ast::ValueName::new(
+                                Ident::new("x"),
+                            )),
                             operation: None,
                         }),
                     )),
