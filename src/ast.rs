@@ -59,7 +59,7 @@ pub fn semantic_state() -> anyhow::Result<State> {
                         Ident::new("y"),
                     )),
                     operation: Some((
-                        ast::ExpressionOperations::Minus,
+                        ast::ExpressionOperations::Plus,
                         Box::new(ast::Expression {
                             expression_value: ast::ExpressionValue::ValueName(ast::ValueName::new(
                                 Ident::new("x"),
