@@ -6,9 +6,10 @@
 
 use crate::ast::{CustomExpression, CustomExpressionInstruction};
 use crate::codegen::function::FuncCodegen;
-use crate::llvm_wrapper::builder::BuilderRef;
-use crate::llvm_wrapper::{context::ContextRef, module::ModuleRef};
 use anyhow::{bail, ensure};
+use llvm_lib::builder::BuilderRef;
+use llvm_lib::core::context::ContextRef;
+use llvm_lib::core::module::ModuleRef;
 use semantic_analyzer::semantic::State;
 use semantic_analyzer::types::semantic::SemanticStackContext;
 use std::rc::Rc;
@@ -23,8 +24,6 @@ use thiserror::Error;
 pub enum CompileError {
     #[error("Unexpected semantic context length")]
     UnexpectedSemanticContextLength,
-    #[error("Unexpected semantic context for Global length")]
-    UnexpectedSemanticContextForGlobalLength,
     #[error("Unexpected semantic global instruction: {0:?}")]
     UnexpectedGlobalInstruction(SemanticStackContext<CustomExpressionInstruction>),
     #[error("Failed write result to file: {file}\nwith error: {msg}")]
@@ -76,18 +75,17 @@ pub fn compile(
         CustomExpressionInstruction,
     >,
 ) -> anyhow::Result<()> {
-    // Current context is pretty simple
+    let global_context = semantic_state.global.context.clone().get();
+
+    let contexts = semantic_state.context.clone();
     ensure!(
-        semantic_state.context.len() == 1,
+        global_context.len() == contexts.len(),
         CompileError::UnexpectedSemanticContextLength
     );
-
-    let global_context = semantic_state.global.context.clone().get();
-    ensure!(
-        global_context.len() == 1,
-        CompileError::UnexpectedSemanticContextForGlobalLength
-    );
-    let _ctx = semantic_state.context[0].clone();
+    for ctx in &contexts {
+        let b_ctx = ctx.borrow().get_context();
+        println!("CTX: {:#?}", b_ctx);
+    }
 
     // Init LLVM codegen variables
     let context = Rc::new(ContextRef::new());
@@ -96,6 +94,7 @@ pub fn compile(
 
     // Fetch global context
     for global_ctx in global_context {
+        // println!("\n\nGLOBAL: {global_ctx:#?}");
         match &global_ctx {
             SemanticStackContext::FunctionDeclaration { fn_decl } => {
                 let mut fn_codegen =
@@ -104,7 +103,7 @@ pub fn compile(
                 // Function declaration codegen
                 fn_codegen.func_declaration(fn_decl)?;
                 // Function body codegen
-                // fn_codegen.func_body(&ctx, fn_decl)?;
+                //fn_codegen.function_body(fn_decl)?;
             }
             _ => bail!(CompileError::UnexpectedGlobalInstruction(global_ctx)),
         }

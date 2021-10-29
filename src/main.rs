@@ -8,7 +8,6 @@ pub mod ast;
 mod codegen;
 pub mod compiler;
 mod func;
-pub mod llvm_wrapper;
 
 fn main() -> anyhow::Result<()> {
     // Get semantic state

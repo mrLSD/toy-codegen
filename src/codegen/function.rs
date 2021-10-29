@@ -1,8 +1,12 @@
-use crate::llvm_wrapper::basic_block::BasicBlockRef;
-use crate::llvm_wrapper::types::TypeRef;
-use crate::llvm_wrapper::value::ValueRef;
-use crate::llvm_wrapper::{builder::BuilderRef, context::ContextRef, module::ModuleRef};
 use anyhow::bail;
+use llvm_lib::basic_block::BasicBlockRef;
+use llvm_lib::builder::BuilderRef;
+use llvm_lib::core::context::ContextRef;
+use llvm_lib::core::module::ModuleRef;
+use llvm_lib::core::types::TypeRef;
+use llvm_lib::core::values::ValueRef;
+use semantic_analyzer::types::block_state::BlockState;
+use semantic_analyzer::types::semantic::{SemanticContextInstruction, SemanticStackContext};
 use semantic_analyzer::types::types::{PrimitiveTypes, Type};
 use semantic_analyzer::types::FunctionStatement;
 use std::rc::Rc;
@@ -27,7 +31,7 @@ impl FuncCodegen {
             context,
             module,
             builder,
-            func_value: Rc::new(ValueRef::create(std::ptr::null_mut())),
+            func_value: Rc::new(ValueRef::from(std::ptr::null_mut())),
             // entities: HashMap::new(),
         }
     }
@@ -91,11 +95,10 @@ impl FuncCodegen {
             )),
         };
         // Generate and set function-value - basic codegen entity for function
-        let func_val = Rc::new(ValueRef::add_function(
-            &self.module,
-            &fn_decl.name.to_string(),
-            &fn_type,
-        ));
+        let func_val = Rc::new(
+            self.module
+                .add_function(&fn_decl.name.to_string(), &fn_type),
+        );
         self.set_func_value(func_val.clone());
         // Set function arguments name
         for (i, param) in fn_decl.parameters.iter().enumerate() {
@@ -105,10 +108,39 @@ impl FuncCodegen {
         Ok(())
     }
 
+    /// Function body codegen
+    pub fn function_body<I>(
+        &mut self,
+        func_body: &BlockState<I>,
+        _fn_decl: &FunctionStatement,
+    ) -> anyhow::Result<()>
+    where
+        I: SemanticContextInstruction,
+    {
+        for body_context in func_body.get_context().get() {
+            match body_context {
+                SemanticStackContext::ExpressionOperation {
+                    operation,
+                    left_value,
+                    right_value,
+                    register_number,
+                } => {
+                    let _ = (operation, left_value, right_value, register_number);
+                    todo!()
+                }
+                _ => todo!(),
+            }
+        }
+        let bb = BasicBlockRef::append_in_context(&self.context, &self.func_value, "entry");
+        self.builder.position_at_end(&bb);
+        let _ = self.builder.build_ret_void();
+        Ok(())
+    }
+
     pub fn set(&self) {
         let void_ty = TypeRef::void_type(&self.context);
         let fn_type = TypeRef::function_type(&[], &void_ty);
-        let function = ValueRef::add_function(&self.module, "main", &fn_type);
+        let function = self.module.add_function("main", &fn_type);
         let bb = BasicBlockRef::append_in_context(&self.context, &function, "entry");
         self.builder.position_at_end(&bb);
         let _ = self.builder.build_ret_void();

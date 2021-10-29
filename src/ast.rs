@@ -129,10 +129,23 @@ pub fn semantic_state(
             }),
         ],
     );
+    let fs1 = ast::FunctionStatement::new(
+        ast::FunctionName::new(Ident::new("run")),
+        vec![],
+        ast::Type::Primitive(ast::PrimitiveTypes::I64),
+        vec![ast::BodyStatement::Return(ast::Expression {
+            expression_value: ast::ExpressionValue::PrimitiveValue(ast::PrimitiveValue::I64(17)),
+            operation: None,
+        })],
+    );
+
     let content: ast::Main<
         CustomExpressionInstruction,
         CustomExpression<CustomExpressionInstruction>,
-    > = vec![ast::MainStatement::Function(fs)];
+    > = vec![
+        ast::MainStatement::Function(fs),
+        ast::MainStatement::Function(fs1),
+    ];
     let mut state: State<
         CustomExpression<CustomExpressionInstruction>,
         CustomExpressionInstruction,
