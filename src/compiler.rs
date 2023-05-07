@@ -19,6 +19,7 @@ use thiserror::Error;
 const RESULT_LL_FILE: &str = "target/res.ll";
 const RESULT_O_FILE: &str = "target/res.o";
 
+/// Compile stage errors
 #[derive(Debug, Error)]
 pub enum CompileError {
     #[error("Unexpected semantic context length")]
@@ -31,6 +32,7 @@ pub enum CompileError {
     WriteResultToFile { file: String, msg: String },
 }
 
+/// Target init errors
 #[derive(Debug, Error)]
 pub enum TargetError {
     #[error("Failed target initialize native: {0}")]
@@ -47,6 +49,7 @@ fn apply_target_to_module(target_machine: &TargetMachine, module: &Module) {
     module.set_data_layout(&target_machine.get_target_data().get_data_layout());
 }
 
+/// Get LLVM native target machine
 fn get_native_target_machine() -> anyhow::Result<TargetMachine> {
     Target::initialize_native(&InitializationConfig::default())
         .map_err(TargetError::TargetInitializeNative)?;
@@ -68,6 +71,7 @@ fn get_native_target_machine() -> anyhow::Result<TargetMachine> {
 /// # Compile processing.
 /// As a compilation source is `semantic_state` results.
 pub fn compile(semantic_state: &State) -> anyhow::Result<()> {
+    // Current context is pretty simple
     ensure!(
         semantic_state.context.len() == 1,
         CompileError::UnexpectedSemanticContextLength

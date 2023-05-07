@@ -38,6 +38,7 @@ pub enum ConstValue<'a> {
     None,
 }
 
+/// `FuncCodegen` errors coverage
 #[derive(Debug, Error)]
 pub enum FuncCodegenError {
     #[error("FunctionValue not exist")]
@@ -48,8 +49,17 @@ pub enum FuncCodegenError {
     IncompatibleTypeForFuncParam(Type),
     #[error("Incompatible type for LetBinding: {0:?}")]
     IncompatibleTypeForLetBinding(Type),
+    #[error("Wrong function return type: {0:?}")]
+    WrongFuncReturnType(Type),
+    #[error("Function parameter type None is deprecated")]
+    FuncParameterNoneTypeDeprecated,
 }
 
+/// # Function codegen
+/// Contains:
+/// - `context` - LLVM context
+/// - `func_val` - LLVM function value as basic entity for function codegen
+/// - `entities` - map of functiob entities based on `ConstValue`
 pub struct FuncCodegen<'ctx> {
     pub context: &'ctx Context,
     pub func_val: Option<FunctionValue<'ctx>>,
@@ -71,62 +81,13 @@ impl<'ctx> FuncCodegen<'ctx> {
             .ok_or_else(|| anyhow!(FuncCodegenError::FuncValueNotExist))
     }
 
-    /// Set codegen Func
+    /// Set codegen Func.
+    /// Function-value - basic codegen entity for function.
     fn set_func(&mut self, func_val: FunctionValue<'ctx>) {
         self.func_val = Some(func_val);
     }
 
-    pub fn fn_declaration(
-        &mut self,
-        module: &Module<'ctx>,
-        fn_decl: &FunctionStatement,
-    ) -> anyhow::Result<()> {
-        let mut args_types: Vec<BasicMetadataTypeEnum> = vec![];
-        for param in &fn_decl.parameters {
-            let res = match &param.parameter_type {
-                Type::Primitive(ty) => self.convert_to_basic_meta_type(ty)?,
-                _ => bail!(FuncCodegenError::IncompatibleTypeForFuncParam(
-                    param.parameter_type.clone()
-                )),
-            };
-            args_types.push(res);
-        }
-
-        let fn_type = match &fn_decl.result_type {
-            Type::Primitive(ty) => self.get_fn_type(ty, &args_types),
-            _ => panic!("func result type currently can be only Type::Primitive"),
-        };
-        let func_val = module.add_function(&fn_decl.name.to_string(), fn_type, None);
-
-        self.set_func(func_val);
-
-        for (i, arg) in func_val.get_param_iter().enumerate() {
-            let param_name = fn_decl.parameters[i].to_string();
-            match &fn_decl.parameters[i].parameter_type {
-                Type::Primitive(ty) => match ty {
-                    PrimitiveTypes::I8
-                    | PrimitiveTypes::I16
-                    | PrimitiveTypes::I32
-                    | PrimitiveTypes::I64
-                    | PrimitiveTypes::U8
-                    | PrimitiveTypes::U16
-                    | PrimitiveTypes::U32
-                    | PrimitiveTypes::U64
-                    | PrimitiveTypes::Bool
-                    | PrimitiveTypes::Char => arg.into_int_value().set_name(&param_name),
-                    PrimitiveTypes::F32 | PrimitiveTypes::F64 => {
-                        arg.into_float_value().set_name(&param_name);
-                    }
-                    PrimitiveTypes::String => arg.into_struct_value().set_name(&param_name),
-                    PrimitiveTypes::Ptr => arg.into_pointer_value().set_name(&param_name),
-                    PrimitiveTypes::None => panic!("None: func parameter not supported"),
-                },
-                _ => panic!("func param type currently can be only Type::Primitive"),
-            }
-        }
-        Ok(())
-    }
-
+    /// Get LLVM function type
     fn get_fn_type(
         &mut self,
         ty: &PrimitiveTypes,
@@ -152,6 +113,69 @@ impl<'ctx> FuncCodegen<'ctx> {
             PrimitiveTypes::None => self.context.void_type().fn_type(param_types, false),
             PrimitiveTypes::Ptr => panic!("function type Ptr not resolved"),
         }
+    }
+
+    /// Function declaration
+    pub fn fn_declaration(
+        &mut self,
+        module: &Module<'ctx>,
+        fn_decl: &FunctionStatement,
+    ) -> anyhow::Result<()> {
+        // Prepare function argument types. For function-declaration
+        // we need only types
+        let mut args_types: Vec<BasicMetadataTypeEnum> = vec![];
+        for param in &fn_decl.parameters {
+            let res = match &param.parameter_type {
+                Type::Primitive(ty) => self.convert_to_basic_meta_type(ty)?,
+                _ => bail!(FuncCodegenError::IncompatibleTypeForFuncParam(
+                    param.parameter_type.clone()
+                )),
+            };
+            args_types.push(res);
+        }
+
+        // Get function declaration type
+        let fn_type = match &fn_decl.result_type {
+            Type::Primitive(ty) => self.get_fn_type(ty, &args_types),
+            _ => bail!(FuncCodegenError::WrongFuncReturnType(
+                fn_decl.result_type.clone()
+            )),
+        };
+        // Generate and set function-value - basic codegen entity for function
+        let func_val = module.add_function(&fn_decl.name.to_string(), fn_type, None);
+        self.set_func(func_val);
+
+        // Attach function parametres
+        for (i, arg) in func_val.get_param_iter().enumerate() {
+            let param_name = fn_decl.parameters[i].to_string();
+            let param_type = &fn_decl.parameters[i].parameter_type;
+            match param_type {
+                Type::Primitive(ty) => match ty {
+                    PrimitiveTypes::I8
+                    | PrimitiveTypes::I16
+                    | PrimitiveTypes::I32
+                    | PrimitiveTypes::I64
+                    | PrimitiveTypes::U8
+                    | PrimitiveTypes::U16
+                    | PrimitiveTypes::U32
+                    | PrimitiveTypes::U64
+                    | PrimitiveTypes::Bool
+                    | PrimitiveTypes::Char => arg.into_int_value().set_name(&param_name),
+                    PrimitiveTypes::F32 | PrimitiveTypes::F64 => {
+                        arg.into_float_value().set_name(&param_name);
+                    }
+                    PrimitiveTypes::String => arg.into_array_value().set_name(&param_name),
+                    PrimitiveTypes::Ptr => arg.into_pointer_value().set_name(&param_name),
+                    PrimitiveTypes::None => {
+                        bail!(FuncCodegenError::FuncParameterNoneTypeDeprecated)
+                    }
+                },
+                _ => bail!(FuncCodegenError::IncompatibleTypeForFuncParam(
+                    param_type.clone()
+                )),
+            }
+        }
+        Ok(())
     }
 
     /// Convert `PrimitiveType` to `AnyTypeEnum`
