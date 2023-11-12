@@ -7,7 +7,8 @@ use inkwell::targets::{
 use inkwell::types::{
     BasicMetadataTypeEnum, BasicType, FloatType, FunctionType, IntType, StringRadix,
 };
-use inkwell::values::{FunctionValue, PointerValue};
+use inkwell::values::PointerValue;
+use inkwell::values::{ArrayValue, FloatValue, FunctionValue, IntValue};
 use inkwell::OptimizationLevel;
 use semantic_analyzer::ast;
 use semantic_analyzer::semantic::State;
@@ -104,72 +105,105 @@ pub struct Codegen<'a> {
     pub module: Module<'a>,
 }
 
+enum ConstValue<'a> {
+    Int(IntValue<'a>),
+    Float(FloatValue<'a>),
+    Bool(IntValue<'a>),
+    Char(IntValue<'a>),
+    String(ArrayValue<'a>),
+    Pointer,
+    None,
+}
+
 struct FuncCodegen<'ctx> {
     context: &'ctx Context,
-    func_val: FunctionValue<'ctx>,
+    func_val: Option<FunctionValue<'ctx>>,
     entities: HashMap<String, PointerValue<'ctx>>,
 }
 
 impl<'ctx> FuncCodegen<'ctx> {
-    fn new(context: &'ctx Context, func_val: FunctionValue<'ctx>) -> Self {
+    fn new(context: &'ctx Context) -> Self {
         Self {
             context,
-            func_val,
+            func_val: None,
             entities: HashMap::new(),
         }
     }
 
-    fn fn_declaration<'a>(
-        &self,
-        module: &Module<'a>,
-        fn_decl: &FunctionStatement,
-    ) -> FunctionValue<'a> {
+    fn get_func(&self) -> FunctionValue<'ctx> {
+        self.func_val.unwrap()
+    }
+
+    fn set_func(&mut self, func_val: FunctionValue<'ctx>) {
+        self.func_val = Some(func_val);
+    }
+
+    fn fn_declaration(&mut self, module: &Module<'ctx>, fn_decl: &FunctionStatement) {
         let args_types = fn_decl
             .parameters
             .iter()
             .map(|p| match &p.parameter_type {
                 Type::Primitive(ty) => self.convert_meta_primitive_type(ty),
-                _ => panic!("wrong type for fn param"),
+                _ => panic!("func param type currently can be only Type::Primitive"),
             })
             .collect::<Vec<BasicMetadataTypeEnum>>();
 
         let fn_type = match &fn_decl.result_type {
             Type::Primitive(ty) => self.get_fn_type(ty, &args_types),
-            _ => panic!("wrong type"),
+            _ => panic!("func result type currently can be only Type::Primitive"),
         };
-        let fn_val = module.add_function(&fn_decl.name.to_string(), fn_type, None);
-        for (i, arg) in fn_val.get_param_iter().enumerate() {
+        let func_val = module.add_function(&fn_decl.name.to_string(), fn_type, None);
+        self.set_func(func_val);
+        for (i, arg) in func_val.get_param_iter().enumerate() {
             let param_name = fn_decl.parameters[i].to_string();
             match &fn_decl.parameters[i].parameter_type {
                 Type::Primitive(ty) => match ty {
-                    PrimitiveTypes::I8 => arg.into_int_value().set_name(&param_name),
-                    PrimitiveTypes::I16 => arg.into_int_value().set_name(&param_name),
-                    PrimitiveTypes::I32 => arg.into_int_value().set_name(&param_name),
-                    PrimitiveTypes::I64 => arg.into_int_value().set_name(&param_name),
-                    PrimitiveTypes::F32 => arg.into_float_value().set_name(&param_name),
-                    PrimitiveTypes::F64 => arg.into_float_value().set_name(&param_name),
-                    _ => panic!("wrong primitive type"),
+                    PrimitiveTypes::I8
+                    | PrimitiveTypes::I16
+                    | PrimitiveTypes::I32
+                    | PrimitiveTypes::I64
+                    | PrimitiveTypes::U8
+                    | PrimitiveTypes::U16
+                    | PrimitiveTypes::U32
+                    | PrimitiveTypes::U64
+                    | PrimitiveTypes::Bool
+                    | PrimitiveTypes::Char => arg.into_int_value().set_name(&param_name),
+                    PrimitiveTypes::F32 | PrimitiveTypes::F64 => {
+                        arg.into_float_value().set_name(&param_name)
+                    }
+                    PrimitiveTypes::String => arg.into_struct_value().set_name(&param_name),
+                    PrimitiveTypes::Ptr => arg.into_pointer_value().set_name(&param_name),
+                    PrimitiveTypes::None => panic!("None: func parameter not supported"),
                 },
-                _ => panic!("wrong param type"),
+                _ => panic!("func param type currently can be only Type::Primitive"),
             }
         }
-        fn_val
     }
 
-    fn get_fn_type<'a>(
+    fn get_fn_type(
         &self,
         ty: &PrimitiveTypes,
-        param_types: &[BasicMetadataTypeEnum<'a>],
-    ) -> FunctionType<'a> {
+        param_types: &[BasicMetadataTypeEnum<'ctx>],
+    ) -> FunctionType<'ctx> {
         match ty {
-            PrimitiveTypes::I8 => self.context.i8_type().fn_type(param_types, false),
-            PrimitiveTypes::I16 => self.context.i16_type().fn_type(param_types, false),
-            PrimitiveTypes::I32 => self.context.i32_type().fn_type(param_types, false),
-            PrimitiveTypes::I64 => self.context.i64_type().fn_type(param_types, false),
+            PrimitiveTypes::I8 | PrimitiveTypes::U8 => {
+                self.context.i8_type().fn_type(param_types, false)
+            }
+            PrimitiveTypes::I16 | PrimitiveTypes::U16 => {
+                self.context.i16_type().fn_type(param_types, false)
+            }
+            PrimitiveTypes::I32 | PrimitiveTypes::U32 | PrimitiveTypes::Char => {
+                self.context.i32_type().fn_type(param_types, false)
+            }
+            PrimitiveTypes::I64 | PrimitiveTypes::U64 => {
+                self.context.i64_type().fn_type(param_types, false)
+            }
             PrimitiveTypes::F32 => self.context.f32_type().fn_type(param_types, false),
             PrimitiveTypes::F64 => self.context.f64_type().fn_type(param_types, false),
+            PrimitiveTypes::Bool => self.context.bool_type().fn_type(param_types, false),
+            PrimitiveTypes::String => self.context.metadata_type().fn_type(param_types, false),
             PrimitiveTypes::None => self.context.void_type().fn_type(param_types, false),
-            _ => panic!("wrong primitive type"),
+            PrimitiveTypes::Ptr => panic!("function type Ptr not resolved"),
         }
     }
 
@@ -193,8 +227,9 @@ impl<'ctx> FuncCodegen<'ctx> {
         alloc_ty: T,
         name: &str,
     ) -> PointerValue<'ctx> {
+        let func_val = self.get_func();
         let builder = self.context.create_builder();
-        let entry = self.func_val.get_first_basic_block().unwrap();
+        let entry = func_val.get_first_basic_block().unwrap();
 
         match entry.get_first_instruction() {
             Some(first_instr) => builder.position_before(&first_instr),
@@ -204,8 +239,9 @@ impl<'ctx> FuncCodegen<'ctx> {
         builder.build_alloca(alloc_ty, name).unwrap()
     }
 
-    fn fn_init_params<'a>(&self, builder: &Builder<'a>, fn_decl: &FunctionStatement) {
-        for (i, arg) in self.func_val.get_param_iter().enumerate() {
+    fn fn_init_params(&self, builder: &Builder<'ctx>, fn_decl: &FunctionStatement) {
+        let func_val = self.get_func();
+        for (i, arg) in func_val.get_param_iter().enumerate() {
             let param_name = fn_decl.parameters[i].to_string();
             match &fn_decl.parameters[i].parameter_type {
                 Type::Primitive(ty) => match ty {
@@ -221,50 +257,154 @@ impl<'ctx> FuncCodegen<'ctx> {
         }
     }
 
+    fn expr_primitive_value(&self, pval: &PrimitiveValue) -> ConstValue {
+        match pval {
+            PrimitiveValue::I8(val) => ConstValue::Int(
+                self.context
+                    .i8_type()
+                    .const_int_from_string(&format!("{val:?}"), StringRadix::Decimal)
+                    .unwrap(),
+            ),
+            PrimitiveValue::I16(val) => ConstValue::Int(
+                self.context
+                    .i16_type()
+                    .const_int_from_string(&format!("{val:?}"), StringRadix::Decimal)
+                    .unwrap(),
+            ),
+            PrimitiveValue::I32(val) => ConstValue::Int(
+                self.context
+                    .i32_type()
+                    .const_int_from_string(&format!("{val:?}"), StringRadix::Decimal)
+                    .unwrap(),
+            ),
+            PrimitiveValue::I64(val) => ConstValue::Int(
+                self.context
+                    .i64_type()
+                    .const_int_from_string(&format!("{val:?}"), StringRadix::Decimal)
+                    .unwrap(),
+            ),
+            PrimitiveValue::U8(val) => ConstValue::Int(
+                self.context
+                    .i8_type()
+                    .const_int_from_string(&format!("{val:?}"), StringRadix::Decimal)
+                    .unwrap(),
+            ),
+            PrimitiveValue::U16(val) => ConstValue::Int(
+                self.context
+                    .i16_type()
+                    .const_int_from_string(&format!("{val:?}"), StringRadix::Decimal)
+                    .unwrap(),
+            ),
+            PrimitiveValue::U32(val) => ConstValue::Int(
+                self.context
+                    .i32_type()
+                    .const_int_from_string(&format!("{val:?}"), StringRadix::Decimal)
+                    .unwrap(),
+            ),
+            PrimitiveValue::U64(val) => ConstValue::Int(
+                self.context
+                    .i64_type()
+                    .const_int_from_string(&format!("{val:?}"), StringRadix::Decimal)
+                    .unwrap(),
+            ),
+            PrimitiveValue::F32(val) => ConstValue::Float(
+                self.context
+                    .f32_type()
+                    .const_float_from_string(&format!("{val:?}")),
+            ),
+            PrimitiveValue::F64(val) => ConstValue::Float(
+                self.context
+                    .f64_type()
+                    .const_float_from_string(&format!("{val:?}")),
+            ),
+            PrimitiveValue::Bool(val) => {
+                ConstValue::Bool(self.context.bool_type().const_int((*val).into(), false))
+            }
+            PrimitiveValue::Char(val) => {
+                ConstValue::Char(self.context.i32_type().const_int((*val).into(), false))
+            }
+            PrimitiveValue::String(val) => {
+                ConstValue::String(self.context.const_string(val.as_bytes(), false))
+            }
+            PrimitiveValue::Ptr => ConstValue::Pointer,
+            PrimitiveValue::None => ConstValue::None,
+        }
+    }
+
     fn func_body(
         &self,
-        module: &Module<'ctx>,
         builder: &Builder<'ctx>,
         func_body: Rc<RefCell<BlockState>>,
+        fn_decl: &FunctionStatement,
     ) {
-        let ctx = func_body.borrow().context.clone().get();
-        println!("{ctx:#?}");
-        match &ctx[0] {
-            SemanticStackContext::ExpressionOperation {
-                operation,
-                left_value,
-                right_value,
-                register_number,
-            } => {
-                match &left_value.expr_value {
-                    ExpressionResultValue::PrimitiveValue(pv) => println!("PrimitiveValue {pv:?}"),
-                    ExpressionResultValue::Register(reg) => println!("Reg {reg:?}"),
+        let func_val = self.get_func();
+        let entry = self.context.append_basic_block(func_val, "entry");
+        builder.position_at_end(entry);
+        self.fn_init_params(builder, fn_decl);
+        builder.position_at_end(entry);
+
+        let ctxs = func_body.borrow().context.clone().get();
+        //println!("{:?}", ctx);
+        for ctx in ctxs {
+            match &ctx {
+                SemanticStackContext::ExpressionOperation {
+                    operation: _,
+                    left_value,
+                    right_value,
+                    register_number: _,
+                } => {
+                    match &left_value.expr_value {
+                        ExpressionResultValue::PrimitiveValue(pv) => {
+                            let val = self.expr_primitive_value(pv);
+                        }
+                        ExpressionResultValue::Register(reg) => {
+                            let val = self
+                                .entities
+                                .get(&format!("{reg:?}"))
+                                .expect("failed get entity");
+                            let ty = match &left_value.expr_type {
+                                Type::Primitive(pty) => {
+                                    println!("OP {pty:?}");
+                                    //self.convert_meta_primitive_type(pty)
+                                }
+                                _ => panic!("operation type currently can be only Type::Primitive"),
+                            };
+
+                            //let pval = builder.build_load(ty, val.clone(), "left_val").unwrap();
+                            // TODO: unclear what about non-int types
+                            // let pval = pval.into_int_value();
+                            // let res = builder.build_and(pval, pval, "1").unwrap();
+                        }
+                    }
+                    match &right_value.expr_value {
+                        ExpressionResultValue::PrimitiveValue(pv) => {
+                            println!("PrimitiveValue {pv:?}")
+                        }
+                        ExpressionResultValue::Register(reg) => println!("Reg {reg:?}"),
+                    }
                 }
-                match &right_value.expr_value {
-                    ExpressionResultValue::PrimitiveValue(pv) => println!("PrimitiveValue {pv:?}"),
-                    ExpressionResultValue::Register(reg) => println!("Reg {reg:?}"),
-                }
-            }
-            SemanticStackContext::ExpressionFunctionReturn { expr_result } => {
-                let ret = match &expr_result.expr_value {
-                    ExpressionResultValue::PrimitiveValue(pval) => match pval {
-                        PrimitiveValue::I8(val) => self
-                            .context
-                            .i8_type()
-                            .const_int_from_string(&format!("{val:?}"), StringRadix::Decimal)
-                            .unwrap(),
-                        PrimitiveValue::I16(val) => self
-                            .context
-                            .i16_type()
-                            .const_int_from_string(&format!("{val:?}"), StringRadix::Decimal)
-                            .unwrap(),
+                SemanticStackContext::ExpressionFunctionReturn { expr_result } => {
+                    let ret = match &expr_result.expr_value {
+                        ExpressionResultValue::PrimitiveValue(pval) => {
+                            self.expr_primitive_value(pval)
+                        }
                         _ => panic!("type not supported"),
-                    },
-                    _ => panic!("type not supported"),
-                };
-                builder.build_return(Some(&ret)).expect("return val");
+                    };
+                    match ret {
+                        ConstValue::Int(v) => builder.build_return(Some(&v)).expect("return val"),
+                        ConstValue::Float(v) => builder.build_return(Some(&v)).expect("return val"),
+                        ConstValue::Bool(v) => builder.build_return(Some(&v)).expect("return val"),
+                        ConstValue::Char(v) => builder.build_return(Some(&v)).expect("return val"),
+                        ConstValue::String(v) => {
+                            builder.build_return(Some(&v)).expect("return val")
+                        }
+                        ConstValue::Pointer | ConstValue::None => {
+                            builder.build_return(None).expect("return val")
+                        }
+                    };
+                }
+                _ => println!("->"),
             }
-            _ => println!("->"),
         }
     }
 }
@@ -276,16 +416,13 @@ fn compiler(semantic_state: &State) {
     assert_eq!(semantic_state.context.len(), 1);
     let global_context = semantic_state.global.context.clone().get();
     assert_eq!(global_context.len(), 1);
+    let ctx = semantic_state.context[0].clone();
 
     match &global_context[0] {
         SemanticStackContext::FunctionDeclaration { fn_decl } => {
-            let fnv = FuncCodegen::new(&context);
-            let func = fnv.fn_declaration(&module, fn_decl);
-            let entry = context.append_basic_block(func, "entry");
-            builder.position_at_end(entry);
-            fn_init_params(&context, func, &builder, fn_decl);
-
-            fnv.func_body(&module, &builder, semantic_state.context[0].clone());
+            let mut fnv = FuncCodegen::new(&context);
+            fnv.fn_declaration(&module, fn_decl);
+            fnv.func_body(&builder, ctx, fn_decl);
         }
         _ => panic!("wrong global_context instruction"),
     }
@@ -302,5 +439,4 @@ fn compiler(semantic_state: &State) {
 fn main() {
     let semantic_state = semantic_stack();
     compiler(&semantic_state);
-    //println!("Stack: {:#?}", semantic_state.global);
 }
