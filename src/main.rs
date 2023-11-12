@@ -17,6 +17,7 @@ use semantic_analyzer::types::semantic::SemanticStackContext;
 use semantic_analyzer::types::types::{PrimitiveTypes, Type};
 use semantic_analyzer::types::{FunctionStatement, PrimitiveValue};
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::rc::Rc;
 
 fn semantic_stack() -> State {
@@ -92,148 +93,179 @@ fn get_native_target_machine() -> Result<TargetMachine, String> {
             &TargetMachine::get_host_cpu_name().to_string(),
             &TargetMachine::get_host_cpu_features().to_string(),
             OptimizationLevel::Aggressive,
-            RelocMode::PIC,
-            CodeModel::Large,
+            RelocMode::Default,
+            CodeModel::Small,
         )
         .ok_or_else(|| String::from("Failed to create target machine"))
 }
 
-fn get_fn_type<'a>(
-    context: &'a Context,
-    ty: &PrimitiveTypes,
-    param_types: &[BasicMetadataTypeEnum<'a>],
-) -> FunctionType<'a> {
-    match ty {
-        PrimitiveTypes::I8 => context.i8_type().fn_type(param_types, false),
-        PrimitiveTypes::I16 => context.i16_type().fn_type(param_types, false),
-        PrimitiveTypes::I32 => context.i32_type().fn_type(param_types, false),
-        PrimitiveTypes::I64 => context.i64_type().fn_type(param_types, false),
-        PrimitiveTypes::F32 => context.f32_type().fn_type(param_types, false),
-        PrimitiveTypes::F64 => context.f64_type().fn_type(param_types, false),
-        PrimitiveTypes::None => context.void_type().fn_type(param_types, false),
-        _ => panic!("wrong primitive type"),
-    }
+pub struct Codegen<'a> {
+    pub context: &'a Context,
+    pub module: Module<'a>,
 }
 
-fn convert_meta_primitive_type<'a, T>(context: &'a Context, ty: &PrimitiveTypes) -> T
-where
-    T: From<IntType<'a>> + From<FloatType<'a>>,
-{
-    match ty {
-        PrimitiveTypes::I8 => context.i8_type().into(),
-        PrimitiveTypes::I16 => context.i16_type().into(),
-        PrimitiveTypes::I32 => context.i32_type().into(),
-        PrimitiveTypes::I64 => context.i64_type().into(),
-        PrimitiveTypes::F32 => context.f32_type().into(),
-        PrimitiveTypes::F64 => context.f64_type().into(),
-        _ => panic!("wrong primitive type"),
-    }
+struct FuncCodegen<'ctx> {
+    context: &'ctx Context,
+    func_val: FunctionValue<'ctx>,
+    entities: HashMap<String, PointerValue<'ctx>>,
 }
 
-fn create_entry_block_alloca<'a, T: BasicType<'a>>(
-    context: &'a Context,
-    fn_value: FunctionValue<'a>,
-    alloc_ty: T,
-    name: &str,
-) -> PointerValue<'a> {
-    let builder = context.create_builder();
-    let entry = fn_value.get_first_basic_block().unwrap();
-
-    match entry.get_first_instruction() {
-        Some(first_instr) => builder.position_before(&first_instr),
-        None => builder.position_at_end(entry),
-    }
-
-    builder.build_alloca(alloc_ty, name).unwrap()
-}
-
-fn fn_init<'a>(
-    context: &'a Context,
-    module: &Module<'a>,
-    fn_decl: &FunctionStatement,
-) -> FunctionValue<'a> {
-    let args_types = fn_decl
-        .parameters
-        .iter()
-        .map(|p| match &p.parameter_type {
-            Type::Primitive(ty) => convert_meta_primitive_type(context, ty),
-            _ => panic!("wrong type for fn param"),
-        })
-        .collect::<Vec<BasicMetadataTypeEnum>>();
-
-    let fn_type = match &fn_decl.result_type {
-        Type::Primitive(ty) => get_fn_type(context, ty, &args_types),
-        _ => panic!("wrong type"),
-    };
-    let fn_val = module.add_function(&fn_decl.name.to_string(), fn_type, None);
-    for (i, arg) in fn_val.get_param_iter().enumerate() {
-        let param_name = fn_decl.parameters[i].to_string();
-        match &fn_decl.parameters[i].parameter_type {
-            Type::Primitive(ty) => match ty {
-                PrimitiveTypes::I8 => arg.into_int_value().set_name(&param_name),
-                PrimitiveTypes::I16 => arg.into_int_value().set_name(&param_name),
-                PrimitiveTypes::I32 => arg.into_int_value().set_name(&param_name),
-                PrimitiveTypes::I64 => arg.into_int_value().set_name(&param_name),
-                PrimitiveTypes::F32 => arg.into_float_value().set_name(&param_name),
-                PrimitiveTypes::F64 => arg.into_float_value().set_name(&param_name),
-                _ => panic!("wrong primitive type"),
-            },
-            _ => panic!("wrong param type"),
+impl<'ctx> FuncCodegen<'ctx> {
+    fn new(context: &'ctx Context, func_val: FunctionValue<'ctx>) -> Self {
+        Self {
+            context,
+            func_val,
+            entities: HashMap::new(),
         }
     }
-    fn_val
-}
 
-fn fn_init_params<'a>(
-    context: &'a Context,
-    fn_val: FunctionValue<'a>,
-    builder: &Builder<'a>,
-    fn_decl: &FunctionStatement,
-) -> FunctionValue<'a> {
-    for (i, arg) in fn_val.get_param_iter().enumerate() {
-        let param_name = fn_decl.parameters[i].to_string();
-        match &fn_decl.parameters[i].parameter_type {
-            Type::Primitive(ty) => match ty {
-                PrimitiveTypes::I8 => {
-                    let alloca =
-                        create_entry_block_alloca(context, fn_val, context.i8_type(), &param_name);
-                    builder.build_store(alloca, arg).unwrap();
-                }
-                _ => panic!("wrong primitive type"),
-            },
-            _ => panic!("wrong param type"),
-        }
-    }
-    fn_val
-}
+    fn fn_declaration<'a>(
+        &self,
+        module: &Module<'a>,
+        fn_decl: &FunctionStatement,
+    ) -> FunctionValue<'a> {
+        let args_types = fn_decl
+            .parameters
+            .iter()
+            .map(|p| match &p.parameter_type {
+                Type::Primitive(ty) => self.convert_meta_primitive_type(ty),
+                _ => panic!("wrong type for fn param"),
+            })
+            .collect::<Vec<BasicMetadataTypeEnum>>();
 
-fn func_body<'a>(
-    context: &'a Context,
-    _module: &Module<'a>,
-    builder: &Builder<'a>,
-    _func: FunctionValue<'a>,
-    func_body: Rc<RefCell<BlockState>>,
-) {
-    let ctx = func_body.borrow().context.clone().get();
-    match &ctx[0] {
-        SemanticStackContext::ExpressionFunctionReturn { expr_result } => {
-            let ret = match &expr_result.expr_value {
-                ExpressionResultValue::PrimitiveValue(pval) => match pval {
-                    PrimitiveValue::I8(val) => context
-                        .i8_type()
-                        .const_int_from_string(&format!("{val:?}"), StringRadix::Decimal)
-                        .unwrap(),
-                    PrimitiveValue::I16(val) => context
-                        .i16_type()
-                        .const_int_from_string(&format!("{val:?}"), StringRadix::Decimal)
-                        .unwrap(),
-                    _ => panic!("type not supported"),
+        let fn_type = match &fn_decl.result_type {
+            Type::Primitive(ty) => self.get_fn_type(ty, &args_types),
+            _ => panic!("wrong type"),
+        };
+        let fn_val = module.add_function(&fn_decl.name.to_string(), fn_type, None);
+        for (i, arg) in fn_val.get_param_iter().enumerate() {
+            let param_name = fn_decl.parameters[i].to_string();
+            match &fn_decl.parameters[i].parameter_type {
+                Type::Primitive(ty) => match ty {
+                    PrimitiveTypes::I8 => arg.into_int_value().set_name(&param_name),
+                    PrimitiveTypes::I16 => arg.into_int_value().set_name(&param_name),
+                    PrimitiveTypes::I32 => arg.into_int_value().set_name(&param_name),
+                    PrimitiveTypes::I64 => arg.into_int_value().set_name(&param_name),
+                    PrimitiveTypes::F32 => arg.into_float_value().set_name(&param_name),
+                    PrimitiveTypes::F64 => arg.into_float_value().set_name(&param_name),
+                    _ => panic!("wrong primitive type"),
                 },
-                _ => panic!("type not supported"),
-            };
-            builder.build_return(Some(&ret)).expect("return val");
+                _ => panic!("wrong param type"),
+            }
         }
-        _ => println!("->"),
+        fn_val
+    }
+
+    fn get_fn_type<'a>(
+        &self,
+        ty: &PrimitiveTypes,
+        param_types: &[BasicMetadataTypeEnum<'a>],
+    ) -> FunctionType<'a> {
+        match ty {
+            PrimitiveTypes::I8 => self.context.i8_type().fn_type(param_types, false),
+            PrimitiveTypes::I16 => self.context.i16_type().fn_type(param_types, false),
+            PrimitiveTypes::I32 => self.context.i32_type().fn_type(param_types, false),
+            PrimitiveTypes::I64 => self.context.i64_type().fn_type(param_types, false),
+            PrimitiveTypes::F32 => self.context.f32_type().fn_type(param_types, false),
+            PrimitiveTypes::F64 => self.context.f64_type().fn_type(param_types, false),
+            PrimitiveTypes::None => self.context.void_type().fn_type(param_types, false),
+            _ => panic!("wrong primitive type"),
+        }
+    }
+
+    fn convert_meta_primitive_type<T>(&self, ty: &PrimitiveTypes) -> T
+    where
+        T: From<IntType<'ctx>> + From<FloatType<'ctx>>,
+    {
+        match ty {
+            PrimitiveTypes::I8 => self.context.i8_type().into(),
+            PrimitiveTypes::I16 => self.context.i16_type().into(),
+            PrimitiveTypes::I32 => self.context.i32_type().into(),
+            PrimitiveTypes::I64 => self.context.i64_type().into(),
+            PrimitiveTypes::F32 => self.context.f32_type().into(),
+            PrimitiveTypes::F64 => self.context.f64_type().into(),
+            _ => panic!("wrong primitive type"),
+        }
+    }
+
+    fn create_entry_block_alloca<T: BasicType<'ctx>>(
+        &self,
+        alloc_ty: T,
+        name: &str,
+    ) -> PointerValue<'ctx> {
+        let builder = self.context.create_builder();
+        let entry = self.func_val.get_first_basic_block().unwrap();
+
+        match entry.get_first_instruction() {
+            Some(first_instr) => builder.position_before(&first_instr),
+            None => builder.position_at_end(entry),
+        }
+
+        builder.build_alloca(alloc_ty, name).unwrap()
+    }
+
+    fn fn_init_params<'a>(&self, builder: &Builder<'a>, fn_decl: &FunctionStatement) {
+        for (i, arg) in self.func_val.get_param_iter().enumerate() {
+            let param_name = fn_decl.parameters[i].to_string();
+            match &fn_decl.parameters[i].parameter_type {
+                Type::Primitive(ty) => match ty {
+                    PrimitiveTypes::I8 => {
+                        let alloca =
+                            self.create_entry_block_alloca(self.context.i8_type(), &param_name);
+                        builder.build_store(alloca, arg).unwrap();
+                    }
+                    _ => panic!("wrong primitive type"),
+                },
+                _ => panic!("wrong param type"),
+            }
+        }
+    }
+
+    fn func_body(
+        &self,
+        module: &Module<'ctx>,
+        builder: &Builder<'ctx>,
+        func_body: Rc<RefCell<BlockState>>,
+    ) {
+        let ctx = func_body.borrow().context.clone().get();
+        println!("{ctx:#?}");
+        match &ctx[0] {
+            SemanticStackContext::ExpressionOperation {
+                operation,
+                left_value,
+                right_value,
+                register_number,
+            } => {
+                match &left_value.expr_value {
+                    ExpressionResultValue::PrimitiveValue(pv) => println!("PrimitiveValue {pv:?}"),
+                    ExpressionResultValue::Register(reg) => println!("Reg {reg:?}"),
+                }
+                match &right_value.expr_value {
+                    ExpressionResultValue::PrimitiveValue(pv) => println!("PrimitiveValue {pv:?}"),
+                    ExpressionResultValue::Register(reg) => println!("Reg {reg:?}"),
+                }
+            }
+            SemanticStackContext::ExpressionFunctionReturn { expr_result } => {
+                let ret = match &expr_result.expr_value {
+                    ExpressionResultValue::PrimitiveValue(pval) => match pval {
+                        PrimitiveValue::I8(val) => self
+                            .context
+                            .i8_type()
+                            .const_int_from_string(&format!("{val:?}"), StringRadix::Decimal)
+                            .unwrap(),
+                        PrimitiveValue::I16(val) => self
+                            .context
+                            .i16_type()
+                            .const_int_from_string(&format!("{val:?}"), StringRadix::Decimal)
+                            .unwrap(),
+                        _ => panic!("type not supported"),
+                    },
+                    _ => panic!("type not supported"),
+                };
+                builder.build_return(Some(&ret)).expect("return val");
+            }
+            _ => println!("->"),
+        }
     }
 }
 
@@ -242,33 +274,28 @@ fn compiler(semantic_state: &State) {
     let module = context.create_module("main");
     let builder = context.create_builder();
     assert_eq!(semantic_state.context.len(), 1);
-
-    //println!("{semantic_state:#?}");
     let global_context = semantic_state.global.context.clone().get();
     assert_eq!(global_context.len(), 1);
+
     match &global_context[0] {
         SemanticStackContext::FunctionDeclaration { fn_decl } => {
-            let func = fn_init(&context, &module, fn_decl);
+            let fnv = FuncCodegen::new(&context);
+            let func = fnv.fn_declaration(&module, fn_decl);
             let entry = context.append_basic_block(func, "entry");
             builder.position_at_end(entry);
             fn_init_params(&context, func, &builder, fn_decl);
 
-            func_body(
-                &context,
-                &module,
-                &builder,
-                func,
-                semantic_state.context[0].clone(),
-            );
+            fnv.func_body(&module, &builder, semantic_state.context[0].clone());
         }
-        _ => panic!("wrong instr"),
+        _ => panic!("wrong global_context instruction"),
     }
 
-    module.print_to_file("res.ll").expect("Failed generate");
     let target_machine = get_native_target_machine().unwrap();
     apply_target_to_module(&target_machine, &module);
+    module.print_to_file("res.ll").expect("Failed generate");
+
     target_machine
-        .write_to_file(&module, FileType::Object, "res.o".as_ref())
+        .write_to_file(&module, FileType::Object, "res.S".as_ref())
         .unwrap();
 }
 

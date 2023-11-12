@@ -168,9 +168,8 @@ checksum = "c08c74e62047bb2de4ff487b251e4a92e24f48745648451635cec7d591162d9f"
 
 [[package]]
 name = "semantic-analyzer"
-version = "0.2.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8b031278bb94c0d88cb279834bb4dcbae23c5f872f86e58963e248b21ac3d06d"
+version = "0.3.0"
+source = "git+https://github.com/mrLSD/semantic-analyzer-rs.git?branch=feat/register-number#17345b2649f9bc931c89298c820f9ad43fde7977"
 dependencies = [
  "nom_locate",
 ]
@@ -193,14 +192,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "test-inkwell"
-version = "0.1.0"
-dependencies = [
- "inkwell",
- "semantic-analyzer",
-]
-
-[[package]]
 name = "thiserror"
 version = "1.0.50"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -218,6 +209,14 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "toy-codegen"
+version = "0.1.0"
+dependencies = [
+ "inkwell",
+ "semantic-analyzer",
 ]
 
 [[package]]
