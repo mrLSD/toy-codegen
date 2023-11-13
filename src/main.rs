@@ -13,7 +13,9 @@ use inkwell::OptimizationLevel;
 use semantic_analyzer::ast;
 use semantic_analyzer::semantic::State;
 use semantic_analyzer::types::block_state::BlockState;
-use semantic_analyzer::types::expression::ExpressionResultValue;
+use semantic_analyzer::types::expression::{
+    ExpressionOperations, ExpressionResult, ExpressionResultValue,
+};
 use semantic_analyzer::types::semantic::SemanticStackContext;
 use semantic_analyzer::types::types::{PrimitiveTypes, Type};
 use semantic_analyzer::types::{FunctionStatement, PrimitiveValue};
@@ -105,20 +107,22 @@ pub struct Codegen<'a> {
     pub module: Module<'a>,
 }
 
+#[derive(Clone)]
 enum ConstValue<'a> {
     Int(IntValue<'a>),
     Float(FloatValue<'a>),
     Bool(IntValue<'a>),
     Char(IntValue<'a>),
     String(ArrayValue<'a>),
-    Pointer,
+    #[allow(dead_code)]
+    Pointer(PointerValue<'a>),
     None,
 }
 
 struct FuncCodegen<'ctx> {
     context: &'ctx Context,
     func_val: Option<FunctionValue<'ctx>>,
-    entities: HashMap<String, PointerValue<'ctx>>,
+    entities: HashMap<String, ConstValue<'ctx>>,
 }
 
 impl<'ctx> FuncCodegen<'ctx> {
@@ -257,7 +261,7 @@ impl<'ctx> FuncCodegen<'ctx> {
         }
     }
 
-    fn expr_primitive_value(&self, pval: &PrimitiveValue) -> ConstValue {
+    fn expr_primitive_value(&self, pval: &PrimitiveValue) -> ConstValue<'ctx> {
         match pval {
             PrimitiveValue::I8(val) => ConstValue::Int(
                 self.context
@@ -326,13 +330,115 @@ impl<'ctx> FuncCodegen<'ctx> {
             PrimitiveValue::String(val) => {
                 ConstValue::String(self.context.const_string(val.as_bytes(), false))
             }
-            PrimitiveValue::Ptr => ConstValue::Pointer,
+            PrimitiveValue::Ptr => panic!("Pointer value not supported"),
             PrimitiveValue::None => ConstValue::None,
         }
     }
 
-    fn func_body(
+    fn expr_value_operation(
         &self,
+        _builder: &Builder<'ctx>,
+        value: &ExpressionResult,
+    ) -> ConstValue<'ctx> {
+        match &value.expr_value {
+            ExpressionResultValue::PrimitiveValue(pv) => self.expr_primitive_value(pv),
+            ExpressionResultValue::Register(reg) => {
+                self.entities
+                    .get(&reg.to_string())
+                    .expect("failed get entity")
+                    .clone()
+                // let ty: BasicTypeEnum = match &value.expr_type {
+                //     Type::Primitive(pty) => self.convert_meta_primitive_type(pty),
+                //     _ => panic!("operation type currently can be only Type::Primitive"),
+                // };
+                // let pval = builder.build_load(ty, *val, "left_val").unwrap();
+                // match &value.expr_type {
+                //     Type::Primitive(pty) => match pty {
+                //         PrimitiveTypes::I8
+                //         | PrimitiveTypes::I16
+                //         | PrimitiveTypes::I32
+                //         | PrimitiveTypes::I64 => ConstValue::Int(pval.into_int_value()),
+                //         PrimitiveTypes::F32 | PrimitiveTypes::F64 => {
+                //             ConstValue::Float(pval.into_float_value())
+                //         }
+                //         _ => panic!("operation type currently can be only Type::Primitive"),
+                //     },
+                //     _ => panic!("operation type currently can be only Type::Primitive"),
+                // }
+            }
+        }
+    }
+
+    fn expr_operation(
+        &mut self,
+        builder: &Builder<'ctx>,
+        operation: &ExpressionOperations,
+        left_value: &ExpressionResult,
+        right_value: &ExpressionResult,
+        register_number: u64,
+    ) {
+        let const_left_value = self.expr_value_operation(builder, left_value);
+        let const_right_value = self.expr_value_operation(builder, right_value);
+        let res = match operation {
+            ExpressionOperations::Plus => {
+                if let (ConstValue::Int(lhs), ConstValue::Int(rhs)) =
+                    (&const_left_value, &const_right_value)
+                {
+                    ConstValue::Int(builder.build_int_add(*lhs, *rhs, "tmp_add").unwrap())
+                } else if let (ConstValue::Float(lhs), ConstValue::Float(rhs)) =
+                    (&const_left_value, &const_right_value)
+                {
+                    ConstValue::Float(builder.build_float_add(*lhs, *rhs, "tmp_add").unwrap())
+                } else {
+                    panic!("unsupported type for operation ");
+                }
+            }
+            ExpressionOperations::Minus => {
+                if let (ConstValue::Int(lhs), ConstValue::Int(rhs)) =
+                    (&const_left_value, &const_right_value)
+                {
+                    ConstValue::Int(builder.build_int_sub(*lhs, *rhs, "tmp_sub").unwrap())
+                } else if let (ConstValue::Float(lhs), ConstValue::Float(rhs)) =
+                    (&const_left_value, &const_right_value)
+                {
+                    ConstValue::Float(builder.build_float_sub(*lhs, *rhs, "tmp_sub").unwrap())
+                } else {
+                    panic!("unsupported type for operation ");
+                }
+            }
+            ExpressionOperations::Multiply => {
+                if let (ConstValue::Int(lhs), ConstValue::Int(rhs)) =
+                    (&const_left_value, &const_right_value)
+                {
+                    ConstValue::Int(builder.build_int_mul(*lhs, *rhs, "tmp_mul").unwrap())
+                } else if let (ConstValue::Float(lhs), ConstValue::Float(rhs)) =
+                    (&const_left_value, &const_right_value)
+                {
+                    ConstValue::Float(builder.build_float_mul(*lhs, *rhs, "tmp_mul").unwrap())
+                } else {
+                    panic!("unsupported type for operation ");
+                }
+            }
+            ExpressionOperations::Divide => {
+                if let (ConstValue::Int(lhs), ConstValue::Int(rhs)) =
+                    (&const_left_value, &const_right_value)
+                {
+                    ConstValue::Int(builder.build_int_signed_div(*lhs, *rhs, "tmp_div").unwrap())
+                } else if let (ConstValue::Float(lhs), ConstValue::Float(rhs)) =
+                    (&const_left_value, &const_right_value)
+                {
+                    ConstValue::Float(builder.build_float_div(*lhs, *rhs, "tmp_div").unwrap())
+                } else {
+                    panic!("unsupported type for operation ");
+                }
+            }
+            _ => panic!("only restricted kind of operations"),
+        };
+        self.entities.insert(register_number.to_string(), res);
+    }
+
+    fn func_body(
+        &mut self,
         builder: &Builder<'ctx>,
         func_body: Rc<RefCell<BlockState>>,
         fn_decl: &FunctionStatement,
@@ -344,44 +450,22 @@ impl<'ctx> FuncCodegen<'ctx> {
         builder.position_at_end(entry);
 
         let ctxs = func_body.borrow().context.clone().get();
-        //println!("{:?}", ctx);
         for ctx in ctxs {
+            println!("{:?}", ctx);
             match &ctx {
                 SemanticStackContext::ExpressionOperation {
-                    operation: _,
+                    operation,
                     left_value,
                     right_value,
-                    register_number: _,
+                    register_number,
                 } => {
-                    match &left_value.expr_value {
-                        ExpressionResultValue::PrimitiveValue(pv) => {
-                            let val = self.expr_primitive_value(pv);
-                        }
-                        ExpressionResultValue::Register(reg) => {
-                            let val = self
-                                .entities
-                                .get(&format!("{reg:?}"))
-                                .expect("failed get entity");
-                            let ty = match &left_value.expr_type {
-                                Type::Primitive(pty) => {
-                                    println!("OP {pty:?}");
-                                    //self.convert_meta_primitive_type(pty)
-                                }
-                                _ => panic!("operation type currently can be only Type::Primitive"),
-                            };
-
-                            //let pval = builder.build_load(ty, val.clone(), "left_val").unwrap();
-                            // TODO: unclear what about non-int types
-                            // let pval = pval.into_int_value();
-                            // let res = builder.build_and(pval, pval, "1").unwrap();
-                        }
-                    }
-                    match &right_value.expr_value {
-                        ExpressionResultValue::PrimitiveValue(pv) => {
-                            println!("PrimitiveValue {pv:?}")
-                        }
-                        ExpressionResultValue::Register(reg) => println!("Reg {reg:?}"),
-                    }
+                    self.expr_operation(
+                        builder,
+                        operation,
+                        left_value,
+                        right_value,
+                        *register_number,
+                    );
                 }
                 SemanticStackContext::ExpressionFunctionReturn { expr_result } => {
                     let ret = match &expr_result.expr_value {
@@ -398,9 +482,10 @@ impl<'ctx> FuncCodegen<'ctx> {
                         ConstValue::String(v) => {
                             builder.build_return(Some(&v)).expect("return val")
                         }
-                        ConstValue::Pointer | ConstValue::None => {
-                            builder.build_return(None).expect("return val")
+                        ConstValue::Pointer(p) => {
+                            builder.build_return(Some(&p)).expect("return val")
                         }
+                        ConstValue::None => builder.build_return(None).expect("return val"),
                     };
                 }
                 _ => println!("->"),
