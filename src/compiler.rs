@@ -5,6 +5,8 @@
 //! Save result to `.ll` source and `.o` binary.
 
 use crate::ast::{CustomExpression, CustomExpressionInstruction};
+use crate::llvm_wrapper::builder::BuilderRef;
+use crate::llvm_wrapper::{context::ContextRef, module::ModuleRef};
 use anyhow::ensure;
 use semantic_analyzer::semantic::State;
 use semantic_analyzer::types::semantic::SemanticStackContext;
@@ -77,14 +79,19 @@ pub fn compile(
         semantic_state.context.len() == 1,
         CompileError::UnexpectedSemanticContextLength
     );
-    /*
-        let global_context = semantic_state.global.context.clone().get();
-        ensure!(
-            global_context.len() == 1,
-            CompileError::UnexpectedSemanticContextForGlobalLength
-        );
-        let ctx = semantic_state.context[0].clone();
 
+    let global_context = semantic_state.global.context.clone().get();
+    ensure!(
+        global_context.len() == 1,
+        CompileError::UnexpectedSemanticContextForGlobalLength
+    );
+    let _ctx = semantic_state.context[0].clone();
+
+    // Init LLVM codegen variables
+    let context = ContextRef::new();
+    let _module = ModuleRef::new("main");
+    let _builder = BuilderRef::new(&context);
+    /*
         // Init LLVM codegen variables
         let context = Context::create();
         let module = context.create_module("main");

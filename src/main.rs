@@ -1,7 +1,8 @@
-#![allow(clippy::module_name_repetitions)]
+#![allow(clippy::new_without_default)]
 
-mod ast;
-mod compiler;
+pub mod ast;
+pub mod compiler;
+pub mod llvm_wrapper;
 // mod func;
 
 fn main() -> anyhow::Result<()> {

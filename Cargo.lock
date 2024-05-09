@@ -43,7 +43,7 @@ dependencies = [
  "either",
  "inkwell_internals",
  "libc",
- "llvm-sys",
+ "llvm-sys 160.1.4",
  "once_cell",
  "thiserror",
 ]
@@ -80,6 +80,20 @@ dependencies = [
  "lazy_static",
  "libc",
  "regex",
+ "semver",
+]
+
+[[package]]
+name = "llvm-sys"
+version = "181.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1e770c3c1ba28b4be3b4f4a7bc621fdb3f10b325f042e7d51dd9298db231df6f"
+dependencies = [
+ "anyhow",
+ "cc",
+ "lazy_static",
+ "libc",
+ "regex-lite",
  "semver",
 ]
 
@@ -164,6 +178,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "regex-lite"
+version = "0.1.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "53a49587ad06b26609c52e423de037e7f57f20d53535d66e08c695f347df952a"
+
+[[package]]
 name = "regex-syntax"
 version = "0.8.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -242,6 +262,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "inkwell",
+ "llvm-sys 181.0.0",
  "semantic-analyzer",
  "thiserror",
 ]
