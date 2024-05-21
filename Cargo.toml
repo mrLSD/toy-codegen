@@ -3,8 +3,12 @@ name = "toy-codegen"
 version = "0.1.0"
 edition = "2021"
 
+[package.metadata]
+clippy.pedantic = true
+clippy.nursery = true
+
 [dependencies]
 inkwell = { git = "https://github.com/TheDan64/inkwell.git", features = ["llvm16-0"] }
 thiserror = "1.0"
 anyhow = "1.0"
-semantic-analyzer = { version = "0.3.3", features = ["codec"] }
+semantic-analyzer = { version = "0.4", features = ["codec"] }

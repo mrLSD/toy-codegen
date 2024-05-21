@@ -17,7 +17,7 @@ use semantic_analyzer::types::block_state::BlockState;
 use semantic_analyzer::types::expression::{
     ExpressionOperations, ExpressionResult, ExpressionResultValue,
 };
-use semantic_analyzer::types::semantic::SemanticStackContext;
+use semantic_analyzer::types::semantic::{SemanticContextInstruction, SemanticStackContext};
 use semantic_analyzer::types::types::{PrimitiveTypes, Type};
 use semantic_analyzer::types::{FunctionStatement, PrimitiveValue, Value};
 use std::cell::RefCell;
@@ -165,7 +165,7 @@ impl<'ctx> FuncCodegen<'ctx> {
         let func_val = module.add_function(&fn_decl.name.to_string(), fn_type, None);
         self.set_func(func_val);
 
-        // Attach function parametres
+        // Attach function parameters
         for (i, arg) in func_val.get_param_iter().enumerate() {
             let param_name = fn_decl.parameters[i].to_string();
             let param_type = &fn_decl.parameters[i].parameter_type;
@@ -401,7 +401,7 @@ impl<'ctx> FuncCodegen<'ctx> {
     }
 
     /// Expression operation codegen.
-    /// Currently opererations possible only for 2 type subset:
+    /// Currently, operations possible only for 2 type subset:
     /// - Int
     /// - Float
     /// Operations itself restricted to:
@@ -662,12 +662,15 @@ impl<'ctx> FuncCodegen<'ctx> {
         Ok(())
     }
 
-    pub fn func_body(
+    pub fn func_body<I>(
         &mut self,
         builder: &Builder<'ctx>,
-        func_body: &Rc<RefCell<BlockState>>,
+        func_body: &Rc<RefCell<BlockState<I>>>,
         fn_decl: &FunctionStatement,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<()>
+        where
+            I: SemanticContextInstruction
+    {
         let func_val = self.get_func()?;
         let entry = self.context.append_basic_block(func_val, "entry");
         builder.position_at_end(entry);

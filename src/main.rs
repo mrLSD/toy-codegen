@@ -1,7 +1,8 @@
 #![allow(clippy::module_name_repetitions)]
+
 mod ast;
 mod compiler;
-mod func;
+// mod func;
 
 fn main() -> anyhow::Result<()> {
     // Get semantic state
