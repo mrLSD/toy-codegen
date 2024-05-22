@@ -1,9 +1,10 @@
 #![allow(clippy::new_without_default)]
 
 pub mod ast;
+mod codegen;
 pub mod compiler;
+mod func;
 pub mod llvm_wrapper;
-// mod func;
 
 fn main() -> anyhow::Result<()> {
     // Get semantic state

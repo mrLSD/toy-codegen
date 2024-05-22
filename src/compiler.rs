@@ -5,9 +5,10 @@
 //! Save result to `.ll` source and `.o` binary.
 
 use crate::ast::{CustomExpression, CustomExpressionInstruction};
+use crate::codegen::function::FuncCodegen;
 use crate::llvm_wrapper::builder::BuilderRef;
 use crate::llvm_wrapper::{context::ContextRef, module::ModuleRef};
-use anyhow::ensure;
+use anyhow::{bail, ensure};
 use semantic_analyzer::semantic::State;
 use semantic_analyzer::types::semantic::SemanticStackContext;
 use thiserror::Error;
@@ -89,28 +90,26 @@ pub fn compile(
 
     // Init LLVM codegen variables
     let context = ContextRef::new();
-    let _module = ModuleRef::new("main");
-    let _builder = BuilderRef::new(&context);
-    /*
-        // Init LLVM codegen variables
-        let context = Context::create();
-        let module = context.create_module("main");
-        let builder = context.create_builder();
+    let module = ModuleRef::new("main");
+    let builder = BuilderRef::new(&context);
 
-        // Fetch global context
-        for global_ctx in global_context {
-            match &global_ctx {
-                SemanticStackContext::FunctionDeclaration { fn_decl } => {
-                    let mut fn_codegen = FuncCodegen::new(&context);
-                    // Function declaration codegen
-                    fn_codegen.fn_declaration(&module, fn_decl)?;
-                    // Function body codegen
-                    fn_codegen.func_body(&builder, &ctx, fn_decl)?;
-                }
-                _ => bail!(CompileError::UnexpectedGlobalInstruction(global_ctx)),
+    // Fetch global context
+    for global_ctx in global_context {
+        match &global_ctx {
+            SemanticStackContext::FunctionDeclaration { fn_decl } => {
+                let mut fn_codegen = FuncCodegen::new(&context, &module, &builder);
+                fn_codegen.set();
+                // Function declaration codegen
+                fn_codegen.func_declaration(fn_decl)?;
+                // Function body codegen
+                // fn_codegen.func_body(&ctx, fn_decl)?;
             }
+            _ => bail!(CompileError::UnexpectedGlobalInstruction(global_ctx)),
         }
+    }
+    module.dump_module();
 
+    /*
         // Get target machine and apply to LLVM-backend
         let target_machine = get_native_target_machine()?;
         apply_target_to_module(&target_machine, &module);

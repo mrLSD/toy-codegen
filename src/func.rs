@@ -4,15 +4,6 @@
 //! - function body codegen
 
 use anyhow::{anyhow, bail};
-use inkwell::builder::{Builder, BuilderError};
-use inkwell::context::Context;
-use inkwell::module::Module;
-use inkwell::types::{
-    AnyTypeEnum, BasicMetadataTypeEnum, BasicTypeEnum, FunctionType, StringRadix,
-};
-use inkwell::values::{ArrayValue, FloatValue, FunctionValue, IntValue};
-use inkwell::values::{BasicValueEnum, PointerValue};
-use inkwell::AddressSpace;
 use semantic_analyzer::types::block_state::BlockState;
 use semantic_analyzer::types::expression::{
     ExpressionOperations, ExpressionResult, ExpressionResultValue,
@@ -23,8 +14,8 @@ use semantic_analyzer::types::{FunctionStatement, PrimitiveValue, Value};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
-use thiserror::Error;
 
+/*
 /// Codegen `ConstValue` representation.
 /// It contains only primitive-based types.
 #[derive(Clone)]
@@ -36,50 +27,6 @@ pub enum ConstValue<'a> {
     String(ArrayValue<'a>),
     Pointer(PointerValue<'a>),
     None,
-}
-
-/// `FuncCodegen` errors coverage
-#[derive(Debug, Error)]
-pub enum FuncCodegenError {
-    #[error("FunctionValue not exist")]
-    FuncValueNotExist,
-    #[error("Failed convert type to LLVM: {0:?}")]
-    FailedConvertType(PrimitiveTypes),
-    #[error("Incompatible type for function parameter: {0:?}")]
-    IncompatibleTypeForFuncParam(Type),
-    #[error("Incompatible type for LetBinding: {0:?}")]
-    IncompatibleTypeForLetBinding(Type),
-    #[error("Wrong function return type: {0:?}")]
-    WrongFuncReturnType(Type),
-    #[error("Function parameter type None is deprecated")]
-    FuncParameterNoneTypeDeprecated,
-    #[error("Failed create function basic block")]
-    FailedCreateBasicBlock,
-    #[error("Failed generate build alloc: {0:?}")]
-    FailedBuildAlloc(BuilderError),
-    #[error("Failed convert IntValue for: {0}")]
-    FailedConvertIntVal(String),
-    #[error("Failed get entity for register: {0:?}")]
-    FailedGetEntityForRegister(u64),
-    #[error("Unsupported expression operation value type")]
-    UnsupportedExpressionOperationValueType,
-    #[error("Unsupported expression operation kind")]
-    UnsupportedExpressionOperationKind,
-    #[error("Failed generate  Build return: {0:?}")]
-    FailedBuildReturn(BuilderError),
-    #[error("Binding value not found: {0}")]
-    BindingValueNotFound(String),
-}
-
-/// # Function codegen
-/// Contains:
-/// - `context` - LLVM context
-/// - `func_val` - LLVM function value as basic entity for function codegen
-/// - `entities` - map of functiob entities based on `ConstValue`
-pub struct FuncCodegen<'ctx> {
-    pub context: &'ctx Context,
-    pub func_val: Option<FunctionValue<'ctx>>,
-    pub entities: HashMap<String, ConstValue<'ctx>>,
 }
 
 impl<'ctx> FuncCodegen<'ctx> {
@@ -668,8 +615,8 @@ impl<'ctx> FuncCodegen<'ctx> {
         func_body: &Rc<RefCell<BlockState<I>>>,
         fn_decl: &FunctionStatement,
     ) -> anyhow::Result<()>
-        where
-            I: SemanticContextInstruction
+    where
+        I: SemanticContextInstruction,
     {
         let func_val = self.get_func()?;
         let entry = self.context.append_basic_block(func_val, "entry");
@@ -717,3 +664,4 @@ impl<'ctx> FuncCodegen<'ctx> {
         Ok(())
     }
 }
+*/

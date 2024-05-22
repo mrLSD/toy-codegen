@@ -1,4 +1,4 @@
-mod basic_block;
+pub mod basic_block;
 pub mod builder;
 pub mod context;
 pub mod module;

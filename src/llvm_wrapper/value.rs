@@ -8,6 +8,11 @@ use std::ffi::CString;
 pub struct ValueRef(LLVMValueRef);
 
 impl ValueRef {
+    /// Create Value form raw Value reference
+    pub fn create(value_ref: LLVMValueRef) -> Self {
+        Self(value_ref)
+    }
+
     /// Get raw value reference
     pub const fn get(&self) -> LLVMValueRef {
         self.0

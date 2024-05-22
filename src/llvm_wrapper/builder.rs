@@ -1,6 +1,9 @@
 use super::basic_block::BasicBlockRef;
 use super::context::ContextRef;
-use llvm_sys::core::{LLVMCreateBuilderInContext, LLVMDisposeBuilder, LLVMPositionBuilderAtEnd};
+use super::value::ValueRef;
+use llvm_sys::core::{
+    LLVMBuildRetVoid, LLVMCreateBuilderInContext, LLVMDisposeBuilder, LLVMPositionBuilderAtEnd,
+};
 use llvm_sys::prelude::LLVMBuilderRef;
 
 /// LLVM Builder wrapper
@@ -21,11 +24,11 @@ impl BuilderRef {
     pub fn position_at_end(&self, basic_block: &BasicBlockRef) {
         unsafe { LLVMPositionBuilderAtEnd(self.0, basic_block.get()) }
     }
-    // TODO: fix it
-    // /// Set and return builder return void value
-    // pub  fn build_ret_void(&self) -> ValueRef {
-    //     unsafe { ValueRef(LLVMBuildRetVoid(self.0)) }
-    // }
+
+    /// Set and return builder return void value
+    pub fn build_ret_void(&self) -> ValueRef {
+        unsafe { ValueRef::create(LLVMBuildRetVoid(self.0)) }
+    }
 }
 
 impl Drop for BuilderRef {
