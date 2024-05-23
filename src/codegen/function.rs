@@ -32,14 +32,38 @@ impl<'a> FuncCodegen<'a> {
         }
     }
 
-    /// Convert types form Semantic types to llvm-wrapperz
+    /// Convert types form Semantic types to llvm-wrapper
     fn convert_to_type(&self, ty: &PrimitiveTypes) -> anyhow::Result<TypeRef> {
-        todo!()
+        match ty {
+            PrimitiveTypes::I8 | PrimitiveTypes::U8 => Ok(TypeRef::i8_type(self.context)),
+            PrimitiveTypes::I16 | PrimitiveTypes::U16 => Ok(TypeRef::i16_type(self.context)),
+            PrimitiveTypes::I32 | PrimitiveTypes::U32 | PrimitiveTypes::Char => {
+                Ok(TypeRef::i32_type(self.context))
+            }
+            PrimitiveTypes::I64 | PrimitiveTypes::U64 => Ok(TypeRef::i64_type(self.context)),
+            PrimitiveTypes::F32 => Ok(TypeRef::f32_type(self.context)),
+            PrimitiveTypes::F64 => Ok(TypeRef::f32_type(self.context)),
+            PrimitiveTypes::Bool => Ok(TypeRef::bool_type(self.context)),
+            PrimitiveTypes::String => {
+                let array_type = TypeRef::i8_type(self.context);
+                Ok(TypeRef::array_type(&array_type, 0))
+            }
+            PrimitiveTypes::None => Ok(TypeRef::void_type(self.context)),
+            PrimitiveTypes::Ptr => {
+                let ptr_raw_type = TypeRef::i8_type(self.context);
+                Ok(TypeRef::ptr_type(ptr_raw_type, 0))
+            }
+        }
     }
 
     /// Generate function type
-    fn get_func_type(&self, ty: &PrimitiveTypes, arg_types: &[TypeRef]) -> TypeRef {
-        todo!()
+    fn get_func_type(
+        &self,
+        return_type: &PrimitiveTypes,
+        arg_types: &[TypeRef],
+    ) -> anyhow::Result<TypeRef> {
+        let fn_return_type = self.convert_to_type(return_type)?;
+        Ok(TypeRef::function_type(arg_types, &fn_return_type))
     }
 
     /// Set function value
@@ -52,6 +76,7 @@ impl<'a> FuncCodegen<'a> {
         // Prepare function argument types. For function-declaration
         // we need only types
         let mut args_types: Vec<TypeRef> = vec![];
+
         for param in &fn_decl.parameters {
             let res = match &param.parameter_type {
                 Type::Primitive(ty) => self.convert_to_type(ty)?,
@@ -64,7 +89,7 @@ impl<'a> FuncCodegen<'a> {
 
         // Get function declaration type
         let fn_type = match &fn_decl.result_type {
-            Type::Primitive(ty) => self.get_func_type(ty, &args_types),
+            Type::Primitive(ty) => self.get_func_type(ty, &args_types)?,
             _ => bail!(error::FuncCodegenError::WrongFuncReturnType(
                 fn_decl.result_type.clone()
             )),
