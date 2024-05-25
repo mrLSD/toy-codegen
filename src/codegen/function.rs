@@ -3,31 +3,31 @@ use crate::llvm_wrapper::types::TypeRef;
 use crate::llvm_wrapper::value::ValueRef;
 use crate::llvm_wrapper::{builder::BuilderRef, context::ContextRef, module::ModuleRef};
 use anyhow::bail;
-use llvm_sys::prelude::LLVMBasicBlockRef;
 use semantic_analyzer::types::types::{PrimitiveTypes, Type};
-use semantic_analyzer::types::{FunctionStatement, PrimitiveValue};
+use semantic_analyzer::types::FunctionStatement;
+use std::rc::Rc;
 
 /// # Function codegen
 /// Contains:
 /// - `context` - LLVM context
 /// - `func_val` - LLVM function value as basic entity for function codegen
-/// - `entities` - map of functiob entities based on `ConstValue`
-pub struct FuncCodegen<'a> {
-    context: &'a ContextRef,
-    module: &'a ModuleRef,
-    builder: &'a BuilderRef,
-    func_value: ValueRef,
+/// - `entities` - map of function entities based on `ConstValue`
+pub struct FuncCodegen {
+    context: Rc<ContextRef>,
+    module: Rc<ModuleRef>,
+    builder: Rc<BuilderRef>,
+    func_value: Rc<ValueRef>,
     //pub entities: HashMap<String, ConstValue<'ctx>>,
 }
 
-impl<'a> FuncCodegen<'a> {
+impl FuncCodegen {
     /// Create function codegen
-    pub fn new(context: &'a ContextRef, module: &'a ModuleRef, builder: &'a BuilderRef) -> Self {
+    pub fn new(context: Rc<ContextRef>, module: Rc<ModuleRef>, builder: Rc<BuilderRef>) -> Self {
         Self {
             context,
             module,
             builder,
-            func_value: ValueRef::create(std::ptr::null_mut()),
+            func_value: Rc::new(ValueRef::create(std::ptr::null_mut())),
             // entities: HashMap::new(),
         }
     }
@@ -35,22 +35,22 @@ impl<'a> FuncCodegen<'a> {
     /// Convert types form Semantic types to llvm-wrapper
     fn convert_to_type(&self, ty: &PrimitiveTypes) -> anyhow::Result<TypeRef> {
         match ty {
-            PrimitiveTypes::I8 | PrimitiveTypes::U8 => Ok(TypeRef::i8_type(self.context)),
-            PrimitiveTypes::I16 | PrimitiveTypes::U16 => Ok(TypeRef::i16_type(self.context)),
+            PrimitiveTypes::I8 | PrimitiveTypes::U8 => Ok(TypeRef::i8_type(&self.context)),
+            PrimitiveTypes::I16 | PrimitiveTypes::U16 => Ok(TypeRef::i16_type(&self.context)),
             PrimitiveTypes::I32 | PrimitiveTypes::U32 | PrimitiveTypes::Char => {
-                Ok(TypeRef::i32_type(self.context))
+                Ok(TypeRef::i32_type(&self.context))
             }
-            PrimitiveTypes::I64 | PrimitiveTypes::U64 => Ok(TypeRef::i64_type(self.context)),
-            PrimitiveTypes::F32 => Ok(TypeRef::f32_type(self.context)),
-            PrimitiveTypes::F64 => Ok(TypeRef::f32_type(self.context)),
-            PrimitiveTypes::Bool => Ok(TypeRef::bool_type(self.context)),
+            PrimitiveTypes::I64 | PrimitiveTypes::U64 => Ok(TypeRef::i64_type(&self.context)),
+            PrimitiveTypes::F32 => Ok(TypeRef::f32_type(&self.context)),
+            PrimitiveTypes::F64 => Ok(TypeRef::f32_type(&self.context)),
+            PrimitiveTypes::Bool => Ok(TypeRef::bool_type(&self.context)),
             PrimitiveTypes::String => {
-                let array_type = TypeRef::i8_type(self.context);
+                let array_type = TypeRef::i8_type(&self.context);
                 Ok(TypeRef::array_type(&array_type, 0))
             }
-            PrimitiveTypes::None => Ok(TypeRef::void_type(self.context)),
+            PrimitiveTypes::None => Ok(TypeRef::void_type(&self.context)),
             PrimitiveTypes::Ptr => {
-                let ptr_raw_type = TypeRef::i8_type(self.context);
+                let ptr_raw_type = TypeRef::i8_type(&self.context);
                 Ok(TypeRef::ptr_type(ptr_raw_type, 0))
             }
         }
@@ -67,7 +67,7 @@ impl<'a> FuncCodegen<'a> {
     }
 
     /// Set function value
-    fn set_func_value(&mut self, func_val: ValueRef) {
+    fn set_func_value(&mut self, func_val: Rc<ValueRef>) {
         self.func_value = func_val;
     }
 
@@ -95,12 +95,17 @@ impl<'a> FuncCodegen<'a> {
             )),
         };
         // Generate and set function-value - basic codegen entity for function
-        let func_val = ValueRef::add_function(self.module, &fn_decl.name.to_string(), &fn_type);
-        self.set_func_value(func_val);
+        let func_val = Rc::new(ValueRef::add_function(
+            &self.module,
+            &fn_decl.name.to_string(),
+            &fn_type,
+        ));
+        self.set_func_value(func_val.clone());
+        for (i, _param) in fn_decl.parameters.iter().enumerate() {
+            let _v = ValueRef::get_func_param(func_val.clone(), i);
+        }
 
         /*
-        // Attach function parameters
-        for (i, arg) in func_val.get_param_iter().enumerate() {
             let param_name = fn_decl.parameters[i].to_string();
             let param_type = &fn_decl.parameters[i].parameter_type;
             match param_type {
@@ -128,16 +133,15 @@ impl<'a> FuncCodegen<'a> {
                     param_type.clone()
                 )),
             }
-        }
         */
         Ok(())
     }
 
     pub fn set(&self) {
-        let void_ty = TypeRef::void_type(self.context);
+        let void_ty = TypeRef::void_type(&self.context);
         let fn_type = TypeRef::function_type(&[], &void_ty);
-        let function = ValueRef::add_function(self.module, "main", &fn_type);
-        let bb = BasicBlockRef::append_in_context(self.context, &function, "entry");
+        let function = ValueRef::add_function(&self.module, "main", &fn_type);
+        let bb = BasicBlockRef::append_in_context(&self.context, &function, "entry");
         self.builder.position_at_end(&bb);
         self.builder.build_ret_void();
     }
@@ -149,6 +153,8 @@ pub mod error {
 
     /// `FuncCodegen` errors coverage
     #[derive(Debug, Error)]
+    // TODO: clippy
+    #[allow(dead_code)]
     pub enum FuncCodegenError {
         #[error("FunctionValue not exist")]
         FuncValueNotExist,

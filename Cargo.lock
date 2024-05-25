@@ -262,6 +262,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "inkwell",
+ "libc",
  "llvm-sys 181.0.0",
  "semantic-analyzer",
  "thiserror",

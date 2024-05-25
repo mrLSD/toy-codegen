@@ -1,12 +1,13 @@
 use super::context::ContextRef;
+use std::ops::Deref;
 
+use crate::llvm_wrapper::utils::CUint;
 use llvm_sys::core::{
-    LLVMArrayType2, LLVMDoubleType, LLVMDoubleTypeInContext, LLVMFloatTypeInContext,
-    LLVMFunctionType, LLVMInt16TypeInContext, LLVMInt1TypeInContext, LLVMInt32TypeInContext,
-    LLVMInt64TypeInContext, LLVMInt8TypeInContext, LLVMPointerType, LLVMVoidTypeInContext,
+    LLVMArrayType2, LLVMDoubleTypeInContext, LLVMFloatTypeInContext, LLVMFunctionType,
+    LLVMInt16TypeInContext, LLVMInt1TypeInContext, LLVMInt32TypeInContext, LLVMInt64TypeInContext,
+    LLVMInt8TypeInContext, LLVMPointerType, LLVMVoidTypeInContext,
 };
 use llvm_sys::prelude::LLVMTypeRef;
-use std::os::raw::c_uint;
 
 /// LLVM Type structure wrapper
 pub struct TypeRef(LLVMTypeRef);
@@ -19,7 +20,7 @@ impl TypeRef {
 
     /// Create Void type in context
     pub fn void_type(context: &ContextRef) -> Self {
-        unsafe { Self(LLVMVoidTypeInContext(context.get())) }
+        unsafe { Self(LLVMVoidTypeInContext(**context)) }
     }
 
     /// Create Ptr type in context
@@ -27,49 +28,49 @@ impl TypeRef {
         unsafe {
             Self(LLVMPointerType(
                 ptr_raw_type.get(),
-                c_uint::try_from(address_space).expect("usize casting fail"),
+                *CUint::from(address_space),
             ))
         }
     }
 
     /// Create f32 type in context
     pub fn f32_type(context: &ContextRef) -> Self {
-        unsafe { Self(LLVMFloatTypeInContext(context.get())) }
+        unsafe { Self(LLVMFloatTypeInContext(**context)) }
     }
 
     /// Create f64 type in context
     pub fn f64_type(context: &ContextRef) -> Self {
-        unsafe { Self(LLVMDoubleTypeInContext(context.get())) }
+        unsafe { Self(LLVMDoubleTypeInContext(**context)) }
     }
 
     /// Create bool type in context
     pub fn bool_type(context: &ContextRef) -> Self {
-        unsafe { Self(LLVMInt1TypeInContext(context.get())) }
+        unsafe { Self(LLVMInt1TypeInContext(**context)) }
     }
 
     /// Create i8 type in context
     pub fn i8_type(context: &ContextRef) -> Self {
-        unsafe { Self(LLVMInt8TypeInContext(context.get())) }
+        unsafe { Self(LLVMInt8TypeInContext(**context)) }
     }
 
     /// Create i16 type in context
     pub fn i16_type(context: &ContextRef) -> Self {
-        unsafe { Self(LLVMInt16TypeInContext(context.get())) }
+        unsafe { Self(LLVMInt16TypeInContext(**context)) }
     }
 
     /// Create i32 type in context
     pub fn i32_type(context: &ContextRef) -> Self {
-        unsafe { Self(LLVMInt32TypeInContext(context.get())) }
+        unsafe { Self(LLVMInt32TypeInContext(**context)) }
     }
 
     /// Create i64 type in context
     pub fn i64_type(context: &ContextRef) -> Self {
-        unsafe { Self(LLVMInt64TypeInContext(context.get())) }
+        unsafe { Self(LLVMInt64TypeInContext(**context)) }
     }
 
     /// Create array type in context based on Type
     pub fn array_type(array_type: &Self, size: u64) -> Self {
-        unsafe { Self(LLVMArrayType2(array_type.get(), size)) }
+        unsafe { Self(LLVMArrayType2(**array_type, size)) }
     }
 
     /// Create function type based on argument types array, and function return type
@@ -85,9 +86,16 @@ impl TypeRef {
             Self(LLVMFunctionType(
                 return_type.0,
                 args,
-                c_uint::try_from(args_type.len()).expect("usize casting fail"),
+                *CUint::from(args_type.len()),
                 0,
             ))
         }
+    }
+}
+
+impl Deref for TypeRef {
+    type Target = LLVMTypeRef;
+    fn deref(&self) -> &Self::Target {
+        &self.0
     }
 }

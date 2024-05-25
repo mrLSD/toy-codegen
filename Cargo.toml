@@ -10,6 +10,7 @@ clippy.nursery = true
 [dependencies]
 inkwell = { git = "https://github.com/TheDan64/inkwell.git", features = ["llvm16-0"] }
 llvm-sys = "181.0"
+libc = "0.2"
 thiserror = "1.0"
 anyhow = "1.0"
 semantic-analyzer = { version = "0.4", features = ["codec"] }

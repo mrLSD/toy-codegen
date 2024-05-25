@@ -1,5 +1,6 @@
 use llvm_sys::core::{LLVMContextCreate, LLVMContextDispose};
 use llvm_sys::prelude::LLVMContextRef;
+use std::ops::Deref;
 
 /// LLVM Context wrapper
 pub struct ContextRef(LLVMContextRef);
@@ -22,5 +23,12 @@ impl Drop for ContextRef {
         unsafe {
             LLVMContextDispose(self.0);
         }
+    }
+}
+
+impl Deref for ContextRef {
+    type Target = LLVMContextRef;
+    fn deref(&self) -> &Self::Target {
+        &self.0
     }
 }

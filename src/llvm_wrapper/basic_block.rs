@@ -1,8 +1,8 @@
 use super::context::ContextRef;
 use super::value::ValueRef;
+use crate::llvm_wrapper::utils::CString;
 use llvm_sys::core::LLVMAppendBasicBlockInContext;
 use llvm_sys::prelude::LLVMBasicBlockRef;
-use std::ffi::CString;
 
 /// LLVM Basic block wrapper
 pub struct BasicBlockRef(LLVMBasicBlockRef);
@@ -17,11 +17,11 @@ impl BasicBlockRef {
     /// TODO: return error
     pub fn append_in_context(context: &ContextRef, function: &ValueRef, name: &str) -> Self {
         unsafe {
-            let bb_name = CString::new(name).expect("CString::new failed");
+            let c_name = CString::from(name);
             Self(LLVMAppendBasicBlockInContext(
-                context.get(),
-                function.get(),
-                bb_name.as_ptr(),
+                **context,
+                **function,
+                c_name.as_ptr(),
             ))
         }
     }

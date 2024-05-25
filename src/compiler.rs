@@ -11,6 +11,7 @@ use crate::llvm_wrapper::{context::ContextRef, module::ModuleRef};
 use anyhow::{bail, ensure};
 use semantic_analyzer::semantic::State;
 use semantic_analyzer::types::semantic::SemanticStackContext;
+use std::rc::Rc;
 use thiserror::Error;
 
 // const RESULT_LL_FILE: &str = "target/res.ll";
@@ -89,15 +90,16 @@ pub fn compile(
     let _ctx = semantic_state.context[0].clone();
 
     // Init LLVM codegen variables
-    let context = ContextRef::new();
-    let module = ModuleRef::new("main");
-    let builder = BuilderRef::new(&context);
+    let context = Rc::new(ContextRef::new());
+    let module = Rc::new(ModuleRef::new("main"));
+    let builder = Rc::new(BuilderRef::new(&context));
 
     // Fetch global context
     for global_ctx in global_context {
         match &global_ctx {
             SemanticStackContext::FunctionDeclaration { fn_decl } => {
-                let mut fn_codegen = FuncCodegen::new(&context, &module, &builder);
+                let mut fn_codegen =
+                    FuncCodegen::new(context.clone(), module.clone(), builder.clone());
                 fn_codegen.set();
                 // Function declaration codegen
                 fn_codegen.func_declaration(fn_decl)?;

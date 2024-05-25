@@ -12,7 +12,7 @@ pub struct BuilderRef(LLVMBuilderRef);
 impl BuilderRef {
     /// Create LLVM module with name
     pub fn new(context: &ContextRef) -> Self {
-        unsafe { Self(LLVMCreateBuilderInContext(context.get())) }
+        unsafe { Self(LLVMCreateBuilderInContext(**context)) }
     }
 
     /// Get raw builder reference

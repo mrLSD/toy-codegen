@@ -3,18 +3,6 @@
 //! - function declaration
 //! - function body codegen
 
-use anyhow::{anyhow, bail};
-use semantic_analyzer::types::block_state::BlockState;
-use semantic_analyzer::types::expression::{
-    ExpressionOperations, ExpressionResult, ExpressionResultValue,
-};
-use semantic_analyzer::types::semantic::{SemanticContextInstruction, SemanticStackContext};
-use semantic_analyzer::types::types::{PrimitiveTypes, Type};
-use semantic_analyzer::types::{FunctionStatement, PrimitiveValue, Value};
-use std::cell::RefCell;
-use std::collections::HashMap;
-use std::rc::Rc;
-
 /*
 /// Codegen `ConstValue` representation.
 /// It contains only primitive-based types.

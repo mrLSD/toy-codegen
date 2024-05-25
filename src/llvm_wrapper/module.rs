@@ -1,18 +1,19 @@
+use crate::llvm_wrapper::utils::CString;
 use llvm_sys::core::{LLVMDisposeModule, LLVMDumpModule, LLVMModuleCreateWithName};
 use llvm_sys::prelude::LLVMModuleRef;
-use std::ffi::CString;
+use std::ops::Deref;
 
 /// LLVM Module wrapper
 pub struct ModuleRef(LLVMModuleRef);
 
 impl ModuleRef {
     /// Create LLVM module with name
-    /// TODO: return error
     pub fn new(module_name: &str) -> Self {
         unsafe {
-            let module_name = CString::new(module_name).expect("CString::new failed");
-            let module_ref = LLVMModuleCreateWithName(module_name.as_ptr());
+            let c_name = CString::from(module_name);
+            let module_ref = LLVMModuleCreateWithName(c_name.as_ptr());
             if module_ref.is_null() {
+                // Force panic as it's unexpected situation
                 panic!("Failed to create LLVM module");
             }
             Self(module_ref)
@@ -29,6 +30,13 @@ impl ModuleRef {
         unsafe {
             LLVMDumpModule(self.0);
         }
+    }
+}
+
+impl Deref for ModuleRef {
+    type Target = LLVMModuleRef;
+    fn deref(&self) -> &Self::Target {
+        &self.0
     }
 }
 
