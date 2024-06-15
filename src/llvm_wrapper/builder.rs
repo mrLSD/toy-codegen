@@ -11,11 +11,13 @@ pub struct BuilderRef(LLVMBuilderRef);
 
 impl BuilderRef {
     /// Create LLVM module with name
+    #[must_use]
     pub fn new(context: &ContextRef) -> Self {
         unsafe { Self(LLVMCreateBuilderInContext(**context)) }
     }
 
     /// Get raw builder reference
+    #[must_use]
     pub const fn get(&self) -> LLVMBuilderRef {
         self.0
     }
@@ -26,6 +28,7 @@ impl BuilderRef {
     }
 
     /// Set and return builder return void value
+    #[must_use]
     pub fn build_ret_void(&self) -> ValueRef {
         unsafe { ValueRef::create(LLVMBuildRetVoid(self.0)) }
     }

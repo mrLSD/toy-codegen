@@ -8,19 +8,23 @@ pub struct ModuleRef(LLVMModuleRef);
 
 impl ModuleRef {
     /// Create LLVM module with name
+    ///
+    /// ## Panics
+    /// If LLVM module creation failed function expected to panic
+    #[must_use]
     pub fn new(module_name: &str) -> Self {
         unsafe {
             let c_name = CString::from(module_name);
             let module_ref = LLVMModuleCreateWithName(c_name.as_ptr());
-            if module_ref.is_null() {
-                // Force panic as it's unexpected situation
-                panic!("Failed to create LLVM module");
-            }
+            // Force panic as it's unexpected situation
+            assert!(!module_ref.is_null(), "Failed to create LLVM module");
+
             Self(module_ref)
         }
     }
 
-    // Get raw module reference
+    /// Get raw module reference
+    #[must_use]
     pub const fn get(&self) -> LLVMModuleRef {
         self.0
     }

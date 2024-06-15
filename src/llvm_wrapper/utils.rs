@@ -3,7 +3,7 @@ use llvm_sys::core::LLVMGetVersion;
 use std::fmt::Display;
 use std::ops::Deref;
 
-/// c_uint wrapper (from C-type)
+/// `c_uint` wrapper (from C-type)
 pub struct CUint(c_uint);
 
 impl From<u32> for CUint {
@@ -27,7 +27,7 @@ impl Deref for CUint {
     }
 }
 
-/// size_t wrapper (from C-type)
+/// `size_t` wrapper (from C-type)
 pub struct SizeT(size_t);
 
 impl From<usize> for SizeT {
@@ -44,12 +44,12 @@ impl Deref for SizeT {
     }
 }
 
-/// CString wrapper
+/// `CString` wrapper
 pub struct CString(std::ffi::CString);
 
 impl From<&str> for CString {
     fn from(value: &str) -> Self {
-        // Force to unwrap CString
+        // Force to unwrap `CString`
         Self(std::ffi::CString::new(value).expect("CString casting fail from str"))
     }
 }
@@ -70,6 +70,7 @@ pub struct Version {
 
 impl Version {
     /// Init and return current LLVM version
+    #[must_use]
     pub fn new() -> Self {
         let mut major: c_uint = 0;
         let mut minor: c_uint = 0;
@@ -85,7 +86,8 @@ impl Version {
     }
 
     /// Return LLVM version data: (major, minor, patch)
-    pub fn get(&self) -> (u32, u32, u32) {
+    #[must_use]
+    pub const fn get(&self) -> (u32, u32, u32) {
         (self.minor, self.minor, self.patch)
     }
 }

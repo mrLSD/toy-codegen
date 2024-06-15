@@ -22,7 +22,7 @@ pub enum SemanticError {
     SemanticAnalyze(Vec<StateErrorResult>),
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CustomExpression<I: SemanticContextInstruction> {
     _marker: PhantomData<I>,
 }
@@ -40,7 +40,7 @@ impl<I: SemanticContextInstruction> ExtendedExpression<I> for CustomExpression<I
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct CustomExpressionInstruction;
 
 impl SemanticContextInstruction for CustomExpressionInstruction {}
@@ -56,6 +56,7 @@ impl Default for CustomSemantic<CustomExpressionInstruction> {
 }
 
 impl CustomSemantic<CustomExpressionInstruction> {
+    #[must_use]
     pub fn new() -> Self {
         Self {
             _state: State::new(),

@@ -1,4 +1,8 @@
-#![allow(clippy::new_without_default)]
+#![allow(
+    clippy::new_without_default,
+    clippy::missing_errors_doc,
+    clippy::module_name_repetitions
+)]
 
 pub mod ast;
 mod codegen;

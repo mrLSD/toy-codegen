@@ -33,37 +33,33 @@ impl FuncCodegen {
     }
 
     /// Convert types form Semantic types to llvm-wrapper
-    fn convert_to_type(&self, ty: &PrimitiveTypes) -> anyhow::Result<TypeRef> {
+    fn convert_to_type(&self, ty: &PrimitiveTypes) -> TypeRef {
         match ty {
-            PrimitiveTypes::I8 | PrimitiveTypes::U8 => Ok(TypeRef::i8_type(&self.context)),
-            PrimitiveTypes::I16 | PrimitiveTypes::U16 => Ok(TypeRef::i16_type(&self.context)),
+            PrimitiveTypes::I8 | PrimitiveTypes::U8 => TypeRef::i8_type(&self.context),
+            PrimitiveTypes::I16 | PrimitiveTypes::U16 => TypeRef::i16_type(&self.context),
             PrimitiveTypes::I32 | PrimitiveTypes::U32 | PrimitiveTypes::Char => {
-                Ok(TypeRef::i32_type(&self.context))
+                TypeRef::i32_type(&self.context)
             }
-            PrimitiveTypes::I64 | PrimitiveTypes::U64 => Ok(TypeRef::i64_type(&self.context)),
-            PrimitiveTypes::F32 => Ok(TypeRef::f32_type(&self.context)),
-            PrimitiveTypes::F64 => Ok(TypeRef::f32_type(&self.context)),
-            PrimitiveTypes::Bool => Ok(TypeRef::bool_type(&self.context)),
+            PrimitiveTypes::I64 | PrimitiveTypes::U64 => TypeRef::i64_type(&self.context),
+            PrimitiveTypes::F32 => TypeRef::f32_type(&self.context),
+            PrimitiveTypes::F64 => TypeRef::f64_type(&self.context),
+            PrimitiveTypes::Bool => TypeRef::bool_type(&self.context),
             PrimitiveTypes::String => {
                 let array_type = TypeRef::i8_type(&self.context);
-                Ok(TypeRef::array_type(&array_type, 0))
+                TypeRef::array_type(&array_type, 0)
             }
-            PrimitiveTypes::None => Ok(TypeRef::void_type(&self.context)),
+            PrimitiveTypes::None => TypeRef::void_type(&self.context),
             PrimitiveTypes::Ptr => {
                 let ptr_raw_type = TypeRef::i8_type(&self.context);
-                Ok(TypeRef::ptr_type(ptr_raw_type, 0))
+                TypeRef::ptr_type(&ptr_raw_type, 0)
             }
         }
     }
 
     /// Generate function type
-    fn get_func_type(
-        &self,
-        return_type: &PrimitiveTypes,
-        arg_types: &[TypeRef],
-    ) -> anyhow::Result<TypeRef> {
-        let fn_return_type = self.convert_to_type(return_type)?;
-        Ok(TypeRef::function_type(arg_types, &fn_return_type))
+    fn get_func_type(&self, return_type: &PrimitiveTypes, arg_types: &[TypeRef]) -> TypeRef {
+        let fn_return_type = self.convert_to_type(return_type);
+        TypeRef::function_type(arg_types, &fn_return_type)
     }
 
     /// Set function value
@@ -79,7 +75,7 @@ impl FuncCodegen {
 
         for param in &fn_decl.parameters {
             let res = match &param.parameter_type {
-                Type::Primitive(ty) => self.convert_to_type(ty)?,
+                Type::Primitive(ty) => self.convert_to_type(ty),
                 _ => bail!(error::FuncCodegenError::IncompatibleTypeForFuncParam(
                     param.parameter_type.clone()
                 )),
@@ -89,7 +85,7 @@ impl FuncCodegen {
 
         // Get function declaration type
         let fn_type = match &fn_decl.result_type {
-            Type::Primitive(ty) => self.get_func_type(ty, &args_types)?,
+            Type::Primitive(ty) => self.get_func_type(ty, &args_types),
             _ => bail!(error::FuncCodegenError::WrongFuncReturnType(
                 fn_decl.result_type.clone()
             )),
@@ -101,39 +97,11 @@ impl FuncCodegen {
             &fn_type,
         ));
         self.set_func_value(func_val.clone());
-        for (i, _param) in fn_decl.parameters.iter().enumerate() {
-            let _v = ValueRef::get_func_param(func_val.clone(), i);
+        // Set function arguments name
+        for (i, param) in fn_decl.parameters.iter().enumerate() {
+            ValueRef::get_func_param(&func_val, i).set_value_name(&param.to_string());
         }
 
-        /*
-            let param_name = fn_decl.parameters[i].to_string();
-            let param_type = &fn_decl.parameters[i].parameter_type;
-            match param_type {
-                Type::Primitive(ty) => match ty {
-                    PrimitiveTypes::I8
-                    | PrimitiveTypes::I16
-                    | PrimitiveTypes::I32
-                    | PrimitiveTypes::I64
-                    | PrimitiveTypes::U8
-                    | PrimitiveTypes::U16
-                    | PrimitiveTypes::U32
-                    | PrimitiveTypes::U64
-                    | PrimitiveTypes::Bool
-                    | PrimitiveTypes::Char => arg.into_int_value().set_name(&param_name),
-                    PrimitiveTypes::F32 | PrimitiveTypes::F64 => {
-                        arg.into_float_value().set_name(&param_name);
-                    }
-                    PrimitiveTypes::String => arg.into_array_value().set_name(&param_name),
-                    PrimitiveTypes::Ptr => arg.into_pointer_value().set_name(&param_name),
-                    PrimitiveTypes::None => {
-                        bail!(FuncCodegenError::FuncParameterNoneTypeDeprecated)
-                    }
-                },
-                _ => bail!(FuncCodegenError::IncompatibleTypeForFuncParam(
-                    param_type.clone()
-                )),
-            }
-        */
         Ok(())
     }
 
@@ -143,7 +111,7 @@ impl FuncCodegen {
         let function = ValueRef::add_function(&self.module, "main", &fn_type);
         let bb = BasicBlockRef::append_in_context(&self.context, &function, "entry");
         self.builder.position_at_end(&bb);
-        self.builder.build_ret_void();
+        let _ = self.builder.build_ret_void();
     }
 }
 

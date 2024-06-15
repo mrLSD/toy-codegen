@@ -11,18 +11,20 @@ pub struct ValueRef(LLVMValueRef);
 
 impl ValueRef {
     /// Create Value form raw Value reference
-    pub fn create(value_ref: LLVMValueRef) -> Self {
+    pub const fn create(value_ref: LLVMValueRef) -> Self {
         Self(value_ref)
     }
 
     /// Get raw value reference
+    #[must_use]
     pub const fn get(&self) -> LLVMValueRef {
         self.0
     }
 
     /// Get function parameter by index
-    pub fn get_func_param(func_value: Rc<Self>, index: usize) -> Self {
-        unsafe { Self(LLVMGetParam(**func_value, *CUint::from(index))) }
+    #[must_use]
+    pub fn get_func_param(func_value: &Rc<Self>, index: usize) -> Self {
+        unsafe { Self(LLVMGetParam(***func_value, *CUint::from(index))) }
     }
 
     /// Set value name, by default in LLVM values monotonic increased
@@ -35,6 +37,7 @@ impl ValueRef {
 
     /// Set add function value based on Function type
     /// TODO: return error
+    #[must_use]
     pub fn add_function(module: &ModuleRef, fn_name: &str, fn_type: &TypeRef) -> Self {
         unsafe {
             let c_name = CString::from(fn_name);

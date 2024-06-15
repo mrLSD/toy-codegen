@@ -43,7 +43,7 @@ dependencies = [
  "either",
  "inkwell_internals",
  "libc",
- "llvm-sys 160.1.4",
+ "llvm-sys 160.2.0",
  "once_cell",
  "thiserror",
 ]
@@ -60,9 +60,9 @@ dependencies = [
 
 [[package]]
 name = "lazy_static"
-version = "1.4.0"
+version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e2abad23fbc42b3700f2f279844dc832adb2b2eb069b2df918f455c4e18cc646"
+checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
 
 [[package]]
 name = "libc"
@@ -71,10 +71,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "97b3888a4aecf77e811145cadf6eef5901f4782c53886191b2f693f24761847c"
 
 [[package]]
-name = "llvm-sys"
-version = "160.1.4"
+name = "llvm-lib"
+version = "0.0.0-reserved"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "49f9888529887dfda6c59e20f0e0727b17e826cd54ae1ddf0d4c83850fa23b69"
+checksum = "84c4a984243315b33e273629df2804ad9ccf06dd977b9d5d0f2b4f89cab02228"
+dependencies = [
+ "llvm-sys 181.1.0",
+]
+
+[[package]]
+name = "llvm-sys"
+version = "160.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0438b23666723e3851fe336c1757acd3c915a0a14b41cc41284143609ca6cdce"
 dependencies = [
  "cc",
  "lazy_static",
@@ -85,9 +94,9 @@ dependencies = [
 
 [[package]]
 name = "llvm-sys"
-version = "181.0.0"
+version = "181.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1e770c3c1ba28b4be3b4f4a7bc621fdb3f10b325f042e7d51dd9298db231df6f"
+checksum = "890e59e3db86b787af9d9b53c6accc0193e9b698293dda178c0821dbc3fb6217"
 dependencies = [
  "anyhow",
  "cc",
@@ -138,9 +147,9 @@ checksum = "3fdb12b2476b595f9358c5161aa467c2438859caa136dec86c26fdd2efe17b92"
 
 [[package]]
 name = "proc-macro2"
-version = "1.0.85"
+version = "1.0.86"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "22244ce15aa966053a896d1accb3a6e68469b97c7f33f284b99f0d576879fc23"
+checksum = "5e719e8df665df0d1c8fbfd238015744736151d4445ec0836b8e628aae103b77"
 dependencies = [
  "unicode-ident",
 ]
@@ -227,9 +236,9 @@ dependencies = [
 
 [[package]]
 name = "syn"
-version = "2.0.66"
+version = "2.0.67"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c42f3f41a2de00b01c0aaad383c5a45241efc8b2d1eda5661812fda5f3cdcff5"
+checksum = "ff8655ed1d86f3af4ee3fd3263786bc14245ad17c4c7e85ba7187fb3ae028c90"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -263,7 +272,8 @@ dependencies = [
  "anyhow",
  "inkwell",
  "libc",
- "llvm-sys 181.0.0",
+ "llvm-lib",
+ "llvm-sys 181.1.0",
  "semantic-analyzer",
  "thiserror",
 ]
